@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "description": "Backend가 rewritten_manual로 확정하기 전에 사람이 쓴 문구를 검증받는 입력.\napp.violations.final_text_validated=true가 되려면 이 호출이 먼저 통과해야 한다.",
+  "properties": {
+    "reviewId": {
+      "title": "Reviewid",
+      "type": "string"
+    },
+    "tenantId": {
+      "title": "Tenantid",
+      "type": "string"
+    },
+    "text": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "reason": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Reason",
+      "type": "string"
+    },
+    "phrase": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Phrase",
+      "type": "string"
+    }
+  },
+  "required": [
+    "reviewId",
+    "tenantId",
+    "text"
+  ],
+  "title": "VerifyRewriteRequest",
+  "type": "object"
+}

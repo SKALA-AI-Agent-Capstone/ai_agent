@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "VisualObservation": {
+      "properties": {
+        "observation": {
+          "title": "Observation",
+          "type": "string"
+        },
+        "concern": {
+          "title": "Concern",
+          "type": "string"
+        },
+        "comparisonLimitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Comparisonlimitations",
+          "type": "array"
+        },
+        "needsAdjacentContext": {
+          "title": "Needsadjacentcontext",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "observation",
+        "concern",
+        "comparisonLimitations",
+        "needsAdjacentContext"
+      ],
+      "title": "VisualObservation",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "sectionTitle": {
+      "title": "Sectiontitle",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/VisualObservation"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "unreadable": {
+      "title": "Unreadable",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sectionTitle",
+    "findings",
+    "unreadable"
+  ],
+  "title": "VisualAssessment",
+  "type": "object"
+}

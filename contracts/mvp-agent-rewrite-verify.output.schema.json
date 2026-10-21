@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "passed": {
+      "title": "Passed",
+      "type": "boolean"
+    },
+    "reasoning": {
+      "title": "Reasoning",
+      "type": "string"
+    }
+  },
+  "required": [
+    "passed",
+    "reasoning"
+  ],
+  "title": "RewriteVerification",
+  "type": "object"
+}

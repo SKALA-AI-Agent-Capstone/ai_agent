@@ -1,0 +1,60 @@
+{
+  "additionalProperties": false,
+  "description": "Backend가 사람의 \"다시쓰기\" 요청을 Agent에 전달하는 입력. 한도와 저장은 Backend가 맡는다.",
+  "properties": {
+    "reviewId": {
+      "title": "Reviewid",
+      "type": "string"
+    },
+    "tenantId": {
+      "title": "Tenantid",
+      "type": "string"
+    },
+    "phrase": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Phrase",
+      "type": "string"
+    },
+    "reason": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Reason",
+      "type": "string"
+    },
+    "claimType": {
+      "default": "",
+      "maxLength": 100,
+      "title": "Claimtype",
+      "type": "string"
+    },
+    "previousRewrites": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Previousrewrites",
+      "type": "array"
+    },
+    "retryNote": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retrynote"
+    }
+  },
+  "required": [
+    "reviewId",
+    "tenantId",
+    "phrase"
+  ],
+  "title": "RewriteRequest",
+  "type": "object"
+}

@@ -1,0 +1,1295 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "description": "식품의약품안전처에서는 다양한 공공데이터 사용자가 기능성화장품의 품목명, 제조업자 및 책임판매업자 현황, 책임판매업등록번호 등의 보고품목정보 및 보고일련번호, 보고일 등의 보고정보 등 기능성화장품 보고품목정보를 신속하게 확인하고 파악할 수 있도록 정보를 제공하고 있습니다. 기능성화장품 보고품목 정보는 소비자가 보다 안전하고 검증된 제품을 선택할 수 있도록 활용할 수 있으며, 소비자 보호 및 국민 보건 향상에 실직적으로 기여할 수 있습니다. 또한 보고된 품목 정보를 기반으로 화장품 시장에 유통되는 기능성화장품의 전반적인 현황을 파악하고 화장품 업계의 제품 정보 등을 확인하여 효율적인 시장 관리 및 건전성을 유지, 품질관리 등에 활용할 수 있습니다. 또한, 개방 데이터는 기능성화장품 산업의 투명성 확보, 제품 신뢰도 향상, 소비자 보호 등 다층적인 기대효과를 창출하는데 기여할 수 있습니다.",
+    "version": "1.0.0",
+    "title": "식품의약품안전처_기능성화장품 보고품목정보"
+  },
+  "host": "apis.data.go.kr/1471000/FtnltCosmRptPrdlstInfoService01",
+  "basePath": "",
+  "schemes": [
+    "https",
+    "http"
+  ],
+  "paths": {
+    "/getRptEntpInq01": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "성공",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "header": {
+                  "type": "object",
+                  "description": "header",
+                  "properties": {
+                    "resultCode": {
+                      "type": "string",
+                      "description": "결과코드",
+                      "properties": {}
+                    },
+                    "resultMsg": {
+                      "type": "string",
+                      "description": "결과메시지",
+                      "properties": {}
+                    }
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "description": "body",
+                  "properties": {
+                    "items": {
+                      "type": "object",
+                      "description": "items",
+                      "properties": {
+                        "item": {
+                          "type": "object",
+                          "description": "item",
+                          "properties": {
+                            "ENTP_SEQ": {
+                              "type": "string",
+                              "description": "업체일련번호",
+                              "properties": {}
+                            },
+                            "ENTP_NAME": {
+                              "type": "string",
+                              "description": "업체명",
+                              "properties": {}
+                            },
+                            "COB_CODE": {
+                              "type": "string",
+                              "description": "업종코드",
+                              "properties": {}
+                            },
+                            "COB_NAME": {
+                              "type": "string",
+                              "description": "업종명",
+                              "properties": {}
+                            },
+                            "ENTP_NO": {
+                              "type": "string",
+                              "description": "업체허가번호",
+                              "properties": {}
+                            },
+                            "PERMIT_KIND_CODE": {
+                              "type": "string",
+                              "description": "허가/신고구분코드",
+                              "properties": {}
+                            },
+                            "PERMIT_KIND_NAME": {
+                              "type": "string",
+                              "description": "허가/신고구분명",
+                              "properties": {}
+                            },
+                            "KFDA_PERMIT_CODE": {
+                              "type": "string",
+                              "description": "업허가식약청코드",
+                              "properties": {}
+                            },
+                            "KFDA_PERMIT_NAME": {
+                              "type": "string",
+                              "description": "업허가식약청명",
+                              "properties": {}
+                            },
+                            "FACTORY_ADDR": {
+                              "type": "string",
+                              "description": "공장주소",
+                              "properties": {}
+                            },
+                            "ENTP_PERMIT_DATE": {
+                              "type": "string",
+                              "description": "업체허가일자",
+                              "properties": {}
+                            },
+                            "BIZRNO": {
+                              "type": "string",
+                              "description": "사업자등록번호",
+                              "properties": {}
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "numOfRows": {
+                      "type": "string",
+                      "description": "한 페이지 결과수",
+                      "properties": {}
+                    },
+                    "pageNo": {
+                      "type": "string",
+                      "description": "페이지 번호",
+                      "properties": {}
+                    },
+                    "totalCount": {
+                      "type": "string",
+                      "description": "전체 결과 수",
+                      "properties": {}
+                    }
+                  }
+                }
+              },
+              "xml": {
+                "name": "response"
+              }
+            }
+          }
+        },
+        "tags": [
+          "API 목록"
+        ],
+        "summary": "보고품목업체정보 조회",
+        "description": "기능성화장품 보고품목정보를 목록으로 조회",
+        "operationId": "getRptEntpInq01",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json",
+          "application/xml"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "serviceKey",
+          "description": "공공데이터포털에서 발급 받은 인증키",
+          "type": "string",
+          "required": true,
+          "in": "query"
+        },
+        {
+          "name": "pageNo",
+          "description": "페이지 번호",
+          "type": "integer",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "numOfRows",
+          "description": "한 페이지 결과수",
+          "type": "integer",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "type",
+          "description": "응답데이터 형식(xml/json) default : xml",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "entp_seq",
+          "description": "업체일련번호",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "entp_name",
+          "description": "업체명",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "bizrno",
+          "description": "사업자등록번호",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        }
+      ]
+    },
+    "/getRptPrdlstInq01": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "성공",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "header": {
+                  "type": "object",
+                  "description": "header",
+                  "properties": {
+                    "resultCode": {
+                      "type": "string",
+                      "description": "결과코드",
+                      "properties": {}
+                    },
+                    "resultMsg": {
+                      "type": "string",
+                      "description": "결과메시지",
+                      "properties": {}
+                    }
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "description": "body",
+                  "properties": {
+                    "items": {
+                      "type": "object",
+                      "description": "items",
+                      "properties": {
+                        "item": {
+                          "type": "object",
+                          "description": "item",
+                          "properties": {
+                            "COSMETIC_REPORT_SEQ": {
+                              "type": "string",
+                              "description": "화장품보고일련번호",
+                              "properties": {}
+                            },
+                            "ITEM_SEQ": {
+                              "type": "string",
+                              "description": "품목일련번호",
+                              "properties": {}
+                            },
+                            "ITEM_NAME": {
+                              "type": "string",
+                              "description": "품목명",
+                              "properties": {}
+                            },
+                            "DEPT_RECEIPT_NO": {
+                              "type": "string",
+                              "description": "부서접수번호",
+                              "properties": {}
+                            },
+                            "REPORT_FLAG_CODE": {
+                              "type": "string",
+                              "description": "화장품보고구분",
+                              "properties": {}
+                            },
+                            "REPORT_FLAG_NAME": {
+                              "type": "string",
+                              "description": "화장품보고구분명",
+                              "properties": {}
+                            },
+                            "MANUF_NAME": {
+                              "type": "string",
+                              "description": "제조원",
+                              "properties": {}
+                            },
+                            "MANUF_COUNTRY_CODE": {
+                              "type": "string",
+                              "description": "제조국가코드",
+                              "properties": {}
+                            },
+                            "MANUF_COUNTRY_NAME": {
+                              "type": "string",
+                              "description": "제조국가명",
+                              "properties": {}
+                            },
+                            "MANUF_PLACE": {
+                              "type": "string",
+                              "description": "제조원소재지",
+                              "properties": {}
+                            },
+                            "ITEM_PH": {
+                              "type": "string",
+                              "description": "품목PH",
+                              "properties": {}
+                            },
+                            "COSMETIC_TARGET_FLAG": {
+                              "type": "string",
+                              "description": "화장품대상구분",
+                              "properties": {}
+                            },
+                            "COSMETIC_TARGET_FLAG_NAME": {
+                              "type": "string",
+                              "description": "화장품대상구분명",
+                              "properties": {}
+                            },
+                            "COSMETIC_STD_CODE": {
+                              "type": "string",
+                              "description": "화장품기준코드",
+                              "properties": {}
+                            },
+                            "COSMETIC_STD_NAME": {
+                              "type": "string",
+                              "description": "화장품기준명",
+                              "properties": {}
+                            },
+                            "ENTP_NAME": {
+                              "type": "string",
+                              "description": "업체명",
+                              "properties": {}
+                            },
+                            "ENTP_SEQ": {
+                              "type": "string",
+                              "description": "업체일련번호",
+                              "properties": {}
+                            },
+                            "REPORT_DATE": {
+                              "type": "string",
+                              "description": "보고일자",
+                              "properties": {}
+                            },
+                            "CANCEL_REQ_DATE": {
+                              "type": "string",
+                              "description": "취하요청일자",
+                              "properties": {}
+                            },
+                            "CANCEL_APPROVAL_DATE": {
+                              "type": "string",
+                              "description": "취하승인일자",
+                              "properties": {}
+                            },
+                            "CANCEL_APPROVAL_YN": {
+                              "type": "string",
+                              "description": "취하승인여부",
+                              "properties": {}
+                            },
+                            "ETHANOL_OVER_YN": {
+                              "type": "string",
+                              "description": "에탄올4%초과여부",
+                              "properties": {}
+                            },
+                            "EE_CODE": {
+                              "type": "string",
+                              "description": "효능효과코드",
+                              "properties": {}
+                            },
+                            "EE_NAME": {
+                              "type": "string",
+                              "description": "효능효과명",
+                              "properties": {}
+                            },
+                            "SPF": {
+                              "type": "string",
+                              "description": "자외선차단지수(SPF)",
+                              "properties": {}
+                            },
+                            "PA": {
+                              "type": "string",
+                              "description": "자외선차단지수(PA)",
+                              "properties": {}
+                            },
+                            "USAGE_DOSAGE": {
+                              "type": "string",
+                              "description": "용법용량",
+                              "properties": {}
+                            },
+                            "EFFECT_YN1": {
+                              "type": "string",
+                              "description": "2호효능효과_미백",
+                              "properties": {}
+                            },
+                            "EFFECT_YN2": {
+                              "type": "string",
+                              "description": "2호효능효과_주름개선",
+                              "properties": {}
+                            },
+                            "EFFECT_YN3": {
+                              "type": "string",
+                              "description": "2호효능효과_자외선",
+                              "properties": {}
+                            },
+                            "WATER_PROOFING_FLAG": {
+                              "type": "string",
+                              "description": "2호효능효과_자외선_내수성",
+                              "properties": {}
+                            },
+                            "WATER_PROOFING_NAME": {
+                              "type": "string",
+                              "description": "2호효능효과_자외선_내수성2",
+                              "properties": {}
+                            },
+                            "EE_DOC_DATA": {
+                              "type": "string",
+                              "description": "효능효과",
+                              "properties": {}
+                            },
+                            "UD_DOC_DATA": {
+                              "type": "string",
+                              "description": "용법용량2",
+                              "properties": {}
+                            },
+                            "NB_DOC_DATA": {
+                              "type": "string",
+                              "description": "주의사항(일반)",
+                              "properties": {}
+                            },
+                            "BIZRNO": {
+                              "type": "string",
+                              "description": "사업자등록번호",
+                              "properties": {}
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "numOfRows": {
+                      "type": "string",
+                      "description": "한 페이지 결과수",
+                      "properties": {}
+                    },
+                    "pageNo": {
+                      "type": "string",
+                      "description": "페이지 번호",
+                      "properties": {}
+                    },
+                    "totalCount": {
+                      "type": "string",
+                      "description": "전체 결과 수",
+                      "properties": {}
+                    }
+                  }
+                }
+              },
+              "xml": {
+                "name": "response"
+              }
+            }
+          }
+        },
+        "tags": [
+          "API 목록"
+        ],
+        "summary": "보고품목정보 조회",
+        "description": "기능성화장품 보고품목정보를 목록으로 조회",
+        "operationId": "getRptPrdlstInq01",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json",
+          "application/xml"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "serviceKey",
+          "description": "공공데이터포털에서 발급 받은 인증키",
+          "type": "string",
+          "required": true,
+          "in": "query"
+        },
+        {
+          "name": "pageNo",
+          "description": "페이지 번호",
+          "type": "integer",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "numOfRows",
+          "description": "한 페이지 결과수",
+          "type": "integer",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "type",
+          "description": "응답데이터 형식(xml/json) default : xml",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "item_seq",
+          "description": "품목일련번호",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "item_name",
+          "description": "품목명",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        },
+        {
+          "name": "cosmetic_report_seq",
+          "description": "화장품보고일련번호",
+          "type": "string",
+          "required": false,
+          "in": "query"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "getRptEntpInq01_response": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "type": "object",
+          "description": "header",
+          "properties": {
+            "resultCode": {
+              "type": "string",
+              "description": "결과코드"
+            },
+            "resultMsg": {
+              "type": "string",
+              "description": "결과메시지"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "description": "body",
+          "properties": {
+            "items": {
+              "type": "object",
+              "description": "items",
+              "properties": {
+                "item": {
+                  "type": "object",
+                  "description": "item",
+                  "properties": {
+                    "ENTP_SEQ": {
+                      "type": "string",
+                      "description": "업체일련번호"
+                    },
+                    "ENTP_NAME": {
+                      "type": "string",
+                      "description": "업체명"
+                    },
+                    "COB_CODE": {
+                      "type": "string",
+                      "description": "업종코드"
+                    },
+                    "COB_NAME": {
+                      "type": "string",
+                      "description": "업종명"
+                    },
+                    "ENTP_NO": {
+                      "type": "string",
+                      "description": "업체허가번호"
+                    },
+                    "PERMIT_KIND_CODE": {
+                      "type": "string",
+                      "description": "허가/신고구분코드"
+                    },
+                    "PERMIT_KIND_NAME": {
+                      "type": "string",
+                      "description": "허가/신고구분명"
+                    },
+                    "KFDA_PERMIT_CODE": {
+                      "type": "string",
+                      "description": "업허가식약청코드"
+                    },
+                    "KFDA_PERMIT_NAME": {
+                      "type": "string",
+                      "description": "업허가식약청명"
+                    },
+                    "FACTORY_ADDR": {
+                      "type": "string",
+                      "description": "공장주소"
+                    },
+                    "ENTP_PERMIT_DATE": {
+                      "type": "string",
+                      "description": "업체허가일자"
+                    },
+                    "BIZRNO": {
+                      "type": "string",
+                      "description": "사업자등록번호"
+                    }
+                  }
+                }
+              }
+            },
+            "numOfRows": {
+              "type": "string",
+              "description": "한 페이지 결과수"
+            },
+            "pageNo": {
+              "type": "string",
+              "description": "페이지 번호"
+            },
+            "totalCount": {
+              "type": "string",
+              "description": "전체 결과 수"
+            }
+          }
+        }
+      }
+    },
+    "getRptPrdlstInq01_response": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "type": "object",
+          "description": "header",
+          "properties": {
+            "resultCode": {
+              "type": "string",
+              "description": "결과코드"
+            },
+            "resultMsg": {
+              "type": "string",
+              "description": "결과메시지"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "description": "body",
+          "properties": {
+            "items": {
+              "type": "object",
+              "description": "items",
+              "properties": {
+                "item": {
+                  "type": "object",
+                  "description": "item",
+                  "properties": {
+                    "COSMETIC_REPORT_SEQ": {
+                      "type": "string",
+                      "description": "화장품보고일련번호"
+                    },
+                    "ITEM_SEQ": {
+                      "type": "string",
+                      "description": "품목일련번호"
+                    },
+                    "ITEM_NAME": {
+                      "type": "string",
+                      "description": "품목명"
+                    },
+                    "DEPT_RECEIPT_NO": {
+                      "type": "string",
+                      "description": "부서접수번호"
+                    },
+                    "REPORT_FLAG_CODE": {
+                      "type": "string",
+                      "description": "화장품보고구분"
+                    },
+                    "REPORT_FLAG_NAME": {
+                      "type": "string",
+                      "description": "화장품보고구분명"
+                    },
+                    "MANUF_NAME": {
+                      "type": "string",
+                      "description": "제조원"
+                    },
+                    "MANUF_COUNTRY_CODE": {
+                      "type": "string",
+                      "description": "제조국가코드"
+                    },
+                    "MANUF_COUNTRY_NAME": {
+                      "type": "string",
+                      "description": "제조국가명"
+                    },
+                    "MANUF_PLACE": {
+                      "type": "string",
+                      "description": "제조원소재지"
+                    },
+                    "ITEM_PH": {
+                      "type": "string",
+                      "description": "품목PH"
+                    },
+                    "COSMETIC_TARGET_FLAG": {
+                      "type": "string",
+                      "description": "화장품대상구분"
+                    },
+                    "COSMETIC_TARGET_FLAG_NAME": {
+                      "type": "string",
+                      "description": "화장품대상구분명"
+                    },
+                    "COSMETIC_STD_CODE": {
+                      "type": "string",
+                      "description": "화장품기준코드"
+                    },
+                    "COSMETIC_STD_NAME": {
+                      "type": "string",
+                      "description": "화장품기준명"
+                    },
+                    "ENTP_NAME": {
+                      "type": "string",
+                      "description": "업체명"
+                    },
+                    "ENTP_SEQ": {
+                      "type": "string",
+                      "description": "업체일련번호"
+                    },
+                    "REPORT_DATE": {
+                      "type": "string",
+                      "description": "보고일자"
+                    },
+                    "CANCEL_REQ_DATE": {
+                      "type": "string",
+                      "description": "취하요청일자"
+                    },
+                    "CANCEL_APPROVAL_DATE": {
+                      "type": "string",
+                      "description": "취하승인일자"
+                    },
+                    "CANCEL_APPROVAL_YN": {
+                      "type": "string",
+                      "description": "취하승인여부"
+                    },
+                    "ETHANOL_OVER_YN": {
+                      "type": "string",
+                      "description": "에탄올4%초과여부"
+                    },
+                    "EE_CODE": {
+                      "type": "string",
+                      "description": "효능효과코드"
+                    },
+                    "EE_NAME": {
+                      "type": "string",
+                      "description": "효능효과명"
+                    },
+                    "SPF": {
+                      "type": "string",
+                      "description": "자외선차단지수(SPF)"
+                    },
+                    "PA": {
+                      "type": "string",
+                      "description": "자외선차단지수(PA)"
+                    },
+                    "USAGE_DOSAGE": {
+                      "type": "string",
+                      "description": "용법용량"
+                    },
+                    "EFFECT_YN1": {
+                      "type": "string",
+                      "description": "2호효능효과_미백"
+                    },
+                    "EFFECT_YN2": {
+                      "type": "string",
+                      "description": "2호효능효과_주름개선"
+                    },
+                    "EFFECT_YN3": {
+                      "type": "string",
+                      "description": "2호효능효과_자외선"
+                    },
+                    "WATER_PROOFING_FLAG": {
+                      "type": "string",
+                      "description": "2호효능효과_자외선_내수성"
+                    },
+                    "WATER_PROOFING_NAME": {
+                      "type": "string",
+                      "description": "2호효능효과_자외선_내수성2"
+                    },
+                    "EE_DOC_DATA": {
+                      "type": "string",
+                      "description": "효능효과"
+                    },
+                    "UD_DOC_DATA": {
+                      "type": "string",
+                      "description": "용법용량2"
+                    },
+                    "NB_DOC_DATA": {
+                      "type": "string",
+                      "description": "주의사항(일반)"
+                    },
+                    "BIZRNO": {
+                      "type": "string",
+                      "description": "사업자등록번호"
+                    }
+                  }
+                }
+              }
+            },
+            "numOfRows": {
+              "type": "string",
+              "description": "한 페이지 결과수"
+            },
+            "pageNo": {
+              "type": "string",
+              "description": "페이지 번호"
+            },
+            "totalCount": {
+              "type": "string",
+              "description": "전체 결과 수"
+            }
+          }
+        }
+      }
+    }
+  },
+  "swaggerOprtinVOs": [
+    {
+      "oprtinUrl": "http://data.mfds.go.kr/openapi/FtnltCosmRptPrdlstInfoService/getRptPrdlstInq",
+      "oprtinNm": "보고품목정보 조회",
+      "oprtinDc": "기능성화장품 보고품목정보를 목록으로 조회",
+      "gwSvcNm": "getRptPrdlstInq01",
+      "operationId": "getRptPrdlstInq01",
+      "publicDataTyDetailCode": "PRDE02",
+      "reqList": [
+        {
+          "paramtrNm": "serviceKey",
+          "paramtrDc": "공공데이터포털에서 발급 받은 인증키",
+          "paramtrBassValue": "인증키 (URL Encode)",
+          "paramtrTy": "string",
+          "paramtrDivision": "필수",
+          "ck": true
+        },
+        {
+          "paramtrNm": "pageNo",
+          "paramtrDc": "페이지 번호",
+          "paramtrBassValue": "1",
+          "paramtrTy": "integer",
+          "paramtrDivision": "옵션",
+          "ck": true
+        },
+        {
+          "paramtrNm": "numOfRows",
+          "paramtrDc": "한 페이지 결과수",
+          "paramtrBassValue": "3",
+          "paramtrTy": "integer",
+          "paramtrDivision": "옵션",
+          "ck": true
+        },
+        {
+          "paramtrNm": "type",
+          "paramtrDc": "응답데이터 형식(xml/json) default : xml",
+          "paramtrBassValue": "xml",
+          "paramtrTy": "string",
+          "paramtrDivision": "옵션",
+          "ck": true
+        },
+        {
+          "paramtrNm": "item_seq",
+          "paramtrDc": "품목일련번호",
+          "paramtrBassValue": "null",
+          "paramtrTy": "string",
+          "paramtrDivision": "옵션",
+          "ck": true
+        },
+        {
+          "paramtrNm": "item_name",
+          "paramtrDc": "품목명",
+          "paramtrBassValue": "더마바이탈나노펩타이드토너",
+          "paramtrTy": "string",
+          "paramtrDivision": "옵션",
+          "ck": true
+        },
+        {
+          "paramtrNm": "cosmetic_report_seq",
+          "paramtrDc": "화장품보고일련번호",
+          "paramtrBassValue": "2008000083",
+          "paramtrTy": "string",
+          "paramtrDivision": "옵션",
+          "ck": true
+        }
+      ],
+      "resList": [
+        {
+          "paramtrNm": "header",
+          "paramtrDc": "header",
+          "arrayYn": "N",
+          "paramtrDefNm": "#/definitions/header",
+          "subDefNm": "header",
+          "paramtrTy": "object",
+          "paramtrDivision": "필수",
+          "ck": true,
+          "subParam": [
+            {
+              "paramtrNm": "resultCode",
+              "paramtrDc": "결과코드",
+              "arrayYn": "N",
+              "paramtrDefNm": "",
+              "paramtrTy": "string",
+              "paramtrDivision": "필수",
+              "ck": true
+            },
+            {
+              "paramtrNm": "resultMsg",
+              "paramtrDc": "결과메시지",
+              "arrayYn": "N",
+              "paramtrDefNm": "",
+              "paramtrTy": "string",
+              "paramtrDivision": "필수",
+              "ck": true
+            }
+          ]
+        },
+        {
+          "paramtrNm": "body",
+          "paramtrDc": "body",
+          "arrayYn": "N",
+          "paramtrDefNm": "#/definitions/body",
+          "subDefNm": "body",
+          "paramtrTy": "object",
+          "paramtrDivision": "필수",
+          "ck": true,
+          "subParam": [
+            {
+              "paramtrNm": "items",
+              "paramtrDc": "items",
+              "arrayYn": "N",
+              "paramtrDefNm": "#/definitions/items",
+              "subDefNm": "items",
+              "paramtrTy": "object",
+              "paramtrDivision": "필수",
+              "ck": true,
+              "subParam": [
+                {
+                  "paramtrNm": "item",
+                  "paramtrDc": "item",
+                  "arrayYn": "N",
+                  "paramtrDefNm": "#/definitions/item",
+                  "subDefNm": "item",
+                  "paramtrTy": "object",
+                  "paramtrDivision": "필수",
+                  "ck": true,
+                  "subParam": [
+                    {
+                      "paramtrNm": "COSMETIC_REPORT_SEQ",
+                      "paramtrDc": "화장품보고일련번호",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "ITEM_SEQ",
+                      "paramtrDc": "품목일련번호",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "ITEM_NAME",
+                      "paramtrDc": "품목명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "DEPT_RECEIPT_NO",
+                      "paramtrDc": "부서접수번호",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "REPORT_FLAG_CODE",
+                      "paramtrDc": "화장품보고구분",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "REPORT_FLAG_NAME",
+                      "paramtrDc": "화장품보고구분명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "MANUF_NAME",
+                      "paramtrDc": "제조원",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "MANUF_COUNTRY_CODE",
+                      "paramtrDc": "제조국가코드",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "MANUF_COUNTRY_NAME",
+                      "paramtrDc": "제조국가명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "MANUF_PLACE",
+                      "paramtrDc": "제조원소재지",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "ITEM_PH",
+                      "paramtrDc": "품목PH",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "COSMETIC_TARGET_FLAG",
+                      "paramtrDc": "화장품대상구분",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "COSMETIC_TARGET_FLAG_NAME",
+                      "paramtrDc": "화장품대상구분명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "COSMETIC_STD_CODE",
+                      "paramtrDc": "화장품기준코드",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "COSMETIC_STD_NAME",
+                      "paramtrDc": "화장품기준명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "ENTP_NAME",
+                      "paramtrDc": "업체명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "ENTP_SEQ",
+                      "paramtrDc": "업체일련번호",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "REPORT_DATE",
+                      "paramtrDc": "보고일자",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "CANCEL_REQ_DATE",
+                      "paramtrDc": "취하요청일자",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "CANCEL_APPROVAL_DATE",
+                      "paramtrDc": "취하승인일자",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "CANCEL_APPROVAL_YN",
+                      "paramtrDc": "취하승인여부",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "ETHANOL_OVER_YN",
+                      "paramtrDc": "에탄올4%초과여부",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "EE_CODE",
+                      "paramtrDc": "효능효과코드",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "EE_NAME",
+                      "paramtrDc": "효능효과명",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "SPF",
+                      "paramtrDc": "자외선차단지수(SPF)",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "PA",
+                      "paramtrDc": "자외선차단지수(PA)",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "USAGE_DOSAGE",
+                      "paramtrDc": "용법용량",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "EFFECT_YN1",
+                      "paramtrDc": "2호효능효과_미백",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "EFFECT_YN2",
+                      "paramtrDc": "2호효능효과_주름개선",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "EFFECT_YN3",
+                      "paramtrDc": "2호효능효과_자외선",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "WATER_PROOFING_FLAG",
+                      "paramtrDc": "2호효능효과_자외선_내수성",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "WATER_PROOFING_NAME",
+                      "paramtrDc": "2호효능효과_자외선_내수성2",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "EE_DOC_DATA",
+                      "paramtrDc": "효능효과",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "UD_DOC_DATA",
+                      "paramtrDc": "용법용량2",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "NB_DOC_DATA",
+                      "paramtrDc": "주의사항(일반)",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    },
+                    {
+                      "paramtrNm": "BIZRNO",
+                      "paramtrDc": "사업자등록번호",
+                      "arrayYn": "N",
+                      "paramtrDefNm": "",
+                      "paramtrTy": "string",
+                      "paramtrDivision": "옵션",
+                      "ck": true
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "paramtrNm": "numOfRows",
+              "paramtrDc": "한 페이지 결과수",
+              "arrayYn": "N",
+              "paramtrDefNm": "",
+              "paramtrTy": "string",
+              "paramtrDivision": "필수",
+              "ck": true
+            },
+            {
+              "paramtrNm": "pageNo",
+              "paramtrDc": "페이지 번호",
+              "arrayYn": "N",
+              "paramtrDefNm": "",
+              "paramtrTy": "string",
+              "paramtrDivision": "필수",
+              "ck": true
+            },
+            {
+              "paramtrNm": "totalCount",
+              "paramtrDc": "전체 결과 수",
+              "arrayYn": "N",
+              "paramtrDefNm": "",
+              "paramtrTy": "string",
+              "paramtrDivision": "필수",
+              "ck": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

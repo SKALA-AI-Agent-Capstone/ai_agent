@@ -1,0 +1,17 @@
+FROM python:3.12-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:0.12.17 /uv /usr/local/bin/uv
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+COPY pyproject.toml uv.lock ./
+COPY packages ./packages
+COPY services/agent ./services/agent
+COPY services/business-mcp ./services/business-mcp
+COPY services/rag-mcp ./services/rag-mcp
+# Source registry for the corpus batch (rag-ingest). PDFs come from the mounted ./data folder or are downloaded.
+COPY resources/reference-sources.json ./registry/reference-sources.json
+RUN uv sync --all-packages --frozen --no-dev
+RUN useradd --create-home --uid 10001 capstone
+USER capstone
+ENV PYTHONUNBUFFERED=1
+CMD ["uv", "run", "--no-sync", "capstone-agent"]

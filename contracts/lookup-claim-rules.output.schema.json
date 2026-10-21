@@ -1,0 +1,391 @@
+{
+  "$defs": {
+    "EvidenceRequirement": {
+      "description": "A row of the 화장품 표시광고 실증 규정 annex: advertised expression -> required substantiation.",
+      "properties": {
+        "expression": {
+          "title": "Expression",
+          "type": "string"
+        },
+        "requirement": {
+          "title": "Requirement",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "section": {
+          "title": "Section",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "requirement",
+        "source",
+        "section",
+        "version",
+        "source_url"
+      ],
+      "title": "EvidenceRequirement",
+      "type": "object"
+    },
+    "RegulationHit": {
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "similarity": {
+          "description": "Retrieval score, not a violation probability.",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Similarity",
+          "type": "number"
+        },
+        "keyword_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keyword Score"
+        },
+        "vector_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vector Score"
+        },
+        "trust_level": {
+          "const": "high",
+          "default": "high",
+          "title": "Trust Level",
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "law",
+            "regulation",
+            "guideline",
+            "association"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "document_key": {
+          "title": "Document Key",
+          "type": "string"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "acquisition": {
+          "title": "Acquisition",
+          "type": "string"
+        },
+        "effective_from": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective From"
+        },
+        "effective_until": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective Until"
+        },
+        "retrieval": {
+          "default": "search",
+          "enum": [
+            "search",
+            "rule",
+            "link"
+          ],
+          "title": "Retrieval",
+          "type": "string"
+        },
+        "item": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Numbered item inside the article, e.g. 제1항제1호",
+          "title": "Item"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/RelatedProvision"
+          },
+          "title": "Related",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "version",
+        "scope",
+        "excerpt",
+        "similarity",
+        "source_type",
+        "document_key",
+        "source_url",
+        "acquisition"
+      ],
+      "title": "RegulationHit",
+      "type": "object"
+    },
+    "RelatedProvision": {
+      "description": "A provision reached by following a citation, delegation or annex link from a hit.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "relation": {
+          "enum": [
+            "cites",
+            "cited_by",
+            "implements",
+            "implemented_by",
+            "annex",
+            "annex_of"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "document_key": {
+          "title": "Document Key",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "excerpt",
+        "version",
+        "relation",
+        "document_key",
+        "source_url"
+      ],
+      "title": "RelatedProvision",
+      "type": "object"
+    },
+    "RetrievalStatus": {
+      "enum": [
+        "FOUND",
+        "NO_RELEVANT_EVIDENCE",
+        "CORPUS_NOT_INDEXED",
+        "SEARCH_ERROR"
+      ],
+      "title": "RetrievalStatus",
+      "type": "string"
+    },
+    "RuleMatch": {
+      "properties": {
+        "rule_id": {
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "matched_by": {
+          "enum": [
+            "claim_type",
+            "pattern"
+          ],
+          "title": "Matched By",
+          "type": "string"
+        },
+        "matched_text": {
+          "title": "Matched Text",
+          "type": "string"
+        },
+        "checks": {
+          "description": "Cross-checks the agent should run",
+          "items": {
+            "type": "string"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "provisions": {
+          "items": {
+            "$ref": "#/$defs/RegulationHit"
+          },
+          "title": "Provisions",
+          "type": "array"
+        },
+        "evidence_requirements": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRequirement"
+          },
+          "title": "Evidence Requirements",
+          "type": "array"
+        },
+        "missing": {
+          "description": "Rule provisions not present in the loaded corpus",
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule_id",
+        "label",
+        "matched_by",
+        "matched_text"
+      ],
+      "title": "RuleMatch",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "contract_version": {
+      "default": "0.1.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/RetrievalStatus"
+    },
+    "review_date": {
+      "format": "date",
+      "title": "Review Date",
+      "type": "string"
+    },
+    "rules_version": {
+      "title": "Rules Version",
+      "type": "string"
+    },
+    "matches": {
+      "items": {
+        "$ref": "#/$defs/RuleMatch"
+      },
+      "title": "Matches",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "status",
+    "review_date",
+    "rules_version"
+  ],
+  "title": "ClaimRulesResult",
+  "type": "object"
+}

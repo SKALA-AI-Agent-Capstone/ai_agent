@@ -1,0 +1,36 @@
+[
+  {
+    "id": "middle_claim",
+    "description": "Long ad with a claim buried in the middle",
+    "text": "순한 보습 사용감과 산뜻한 마무리. ",
+    "repeat_before": 450,
+    "insert": "단 7일 만에 깊은 주름이 사라집니다.",
+    "repeat_after": 450,
+    "expected": ["단 7일 만에 깊은 주름이 사라집니다"]
+  },
+  {
+    "id": "start_and_end",
+    "description": "Claims at both ends of a long ad",
+    "prefix": "모든 피부병을 치료합니다. ",
+    "text": "촉촉한 사용감과 은은한 향. ",
+    "repeat_before": 850,
+    "suffix": " 사용 즉시 피부가 20년 젊어집니다.",
+    "expected": ["모든 피부병을 치료합니다", "사용 즉시 피부가 20년 젊어집니다"]
+  },
+  {
+    "id": "ordinary_copy",
+    "description": "Non-medical mood copy should not be flagged",
+    "text": "산뜻한 사용감과 촉촉한 마무리. ",
+    "repeat_before": 900,
+    "expected": []
+  },
+  {
+    "id": "repeated_claim",
+    "description": "Two separate occurrences must retain their own offsets",
+    "prefix": "기미가 완전히 사라집니다. ",
+    "text": "부드러운 사용감. ",
+    "repeat_before": 900,
+    "suffix": " 기미가 완전히 사라집니다.",
+    "expected": ["기미가 완전히 사라집니다", "기미가 완전히 사라집니다"]
+  }
+]

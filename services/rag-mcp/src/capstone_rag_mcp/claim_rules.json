@@ -1,0 +1,389 @@
+{
+  "version": "2026-10-21.3",
+  "note": "광고 주장 유형별 근거 조항과 필요한 대조. 조항은 적재된 공식 원문에서 현행 버전으로 찾는다. 호 번호는 개정으로 바뀔 수 있어 item_hint 문구로 찾는다. 규칙에 걸렸다는 것은 위반 판정이 아니라 담당자가 확인할 근거 후보라는 뜻이다. sweep=true인 규칙은 모델이 놓친 줄을 찾기 위해 OCR 전체 줄에도 적용한다.",
+  "rules": [
+    {
+      "id": "drug",
+      "label": "의약품 오인 표현",
+      "claim_types": [
+        "drug"
+      ],
+      "patterns": [
+        "치료",
+        "예방",
+        "처치",
+        "질환",
+        "질병",
+        "아토피",
+        "여드름 ?(개선|완화|치료)",
+        "완치",
+        "염증",
+        "항염",
+        "살균",
+        "소독",
+        "상처",
+        "재생",
+        "의약",
+        "약효",
+        "처방"
+      ],
+      "provisions": [
+        {
+          "document_key": "legalize-kr:화장품법/법률",
+          "section": "제13조",
+          "item_hint": "의약품으로 잘못 인식할 우려"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 가목"
+        },
+        {
+          "document_key": "pdf:S01",
+          "section": "[별표 1]",
+          "query": "질병을 진단 치료 경감 처치 예방 의학적 효능"
+        }
+      ],
+      "checks": [],
+      "sweep": true
+    },
+    {
+      "id": "functional",
+      "label": "기능성화장품 효능 표현",
+      "claim_types": [
+        "wrinkle",
+        "whitening"
+      ],
+      "patterns": [
+        "주름",
+        "미백",
+        "기미",
+        "주근깨",
+        "자외선",
+        "SPF",
+        "PA\\+",
+        "탈모",
+        "튼살",
+        "여드름성",
+        "기능성"
+      ],
+      "provisions": [
+        {
+          "document_key": "legalize-kr:화장품법/법률",
+          "section": "제13조",
+          "item_hint": "기능성화장품이 아닌 화장품을 기능성화장품으로 잘못 인식"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 나목"
+        },
+        {
+          "document_key": "pdf:S01",
+          "section": "[별표 2] > 1.",
+          "query": "주름개선 기능성 심사 보고 자료"
+        }
+      ],
+      "checks": [
+        "functional_report"
+      ],
+      "sweep": true
+    },
+    {
+      "id": "official_endorsement",
+      "label": "식약처, 전문가, 기관의 인증이나 추천 표현",
+      "claim_types": [],
+      "patterns": [
+        "식약처",
+        "식품의약품안전처",
+        "인증",
+        "허가",
+        "공인",
+        "추천",
+        "의사",
+        "피부과(?!학)",
+        "전문의",
+        "약사",
+        "병원",
+        "FDA"
+      ],
+      "provisions": [
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 다목"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 사목"
+        },
+        {
+          "document_key": "legalize-kr:화장품법/법률",
+          "section": "제13조",
+          "item_hint": "심사결과와 다른 내용"
+        }
+      ],
+      "checks": [
+        "functional_report"
+      ],
+      "sweep": true
+    },
+    {
+      "id": "substantiation",
+      "label": "수치, 시험, 임상 결과 표현 (실증 필요)",
+      "claim_types": [
+        "clinical"
+      ],
+      "patterns": [
+        "\\d+(\\.\\d+)? ?%",
+        "\\d+ ?(일|주|시간|회|분|도)",
+        "임상",
+        "인체 ?적용",
+        "시험",
+        "테스트",
+        "검증",
+        "입증",
+        "개선율",
+        "\\d+ ?종"
+      ],
+      "provisions": [
+        {
+          "document_key": "legalize-kr:화장품법/법률",
+          "section": "제14조"
+        },
+        {
+          "document_key": "legalize-kr:화장품법/시행규칙",
+          "section": "제23조"
+        },
+        {
+          "document_key": "lawapi:S07",
+          "section": "제3조"
+        },
+        {
+          "document_key": "lawapi:S07",
+          "section": "제4조"
+        }
+      ],
+      "evidence_rows": {
+        "document_key": "lawapi:S07",
+        "section_prefix": "별표 「"
+      },
+      "checks": [
+        "substantiation"
+      ],
+      "sweep": true
+    },
+    {
+      "id": "absolute_comparison",
+      "label": "절대적 표현과 비교 표현",
+      "claim_types": [
+        "absolute"
+      ],
+      "patterns": [
+        "최고",
+        "최상",
+        "최초",
+        "유일",
+        "완벽",
+        "100 ?%",
+        "완전",
+        "영구",
+        "즉시",
+        "단숨에",
+        "No\\.? ?1",
+        "1위",
+        "넘버원",
+        "타사",
+        "경쟁",
+        "보다 \\S+ ?(좋|우수|뛰어)"
+      ],
+      "provisions": [
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 바목"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 사목"
+        }
+      ],
+      "checks": [],
+      "sweep": true
+    },
+    {
+      "id": "unverifiable_effect",
+      "label": "사실과 다르거나 객관적으로 확인되지 않은 효능 표현",
+      "claim_types": [
+        "exaggeration"
+      ],
+      "patterns": [
+        "노화",
+        "되돌",
+        "회춘",
+        "리프팅",
+        "탄력",
+        "광채",
+        "윤기",
+        "생기",
+        "재생",
+        "젊어",
+        "안티에이징"
+      ],
+      "provisions": [
+        {
+          "document_key": "legalize-kr:화장품법/법률",
+          "section": "제13조",
+          "item_hint": "사실과 다르게 소비자를 속이거나"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 사목"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 아목"
+        }
+      ],
+      "evidence_rows": {
+        "document_key": "lawapi:S07",
+        "section_prefix": "별표 「"
+      },
+      "checks": [],
+      "sweep": false
+    },
+    {
+      "id": "ingredient",
+      "label": "성분, 원료, 함량, 무첨가 표현",
+      "claim_types": [
+        "ingredient"
+      ],
+      "patterns": [
+        "추출물",
+        "성분",
+        "원료",
+        "함유",
+        "무첨가",
+        "무\\(無\\)",
+        "프리",
+        "free",
+        "Free",
+        "펩타이드",
+        "히알루론산",
+        "세라마이드",
+        "레티놀",
+        "나이아신아마이드"
+      ],
+      "provisions": [
+        {
+          "document_key": "pdf:S01",
+          "section": "[별표 2] > 2.",
+          "query": "무 표현 특정성분 함유하지 않았다"
+        },
+        {
+          "document_key": "pdf:S01",
+          "section": "9.",
+          "query": "추출물 함량 표시 광고"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 사목"
+        }
+      ],
+      "checks": [
+        "ingredient"
+      ],
+      "sweep": false
+    },
+    {
+      "id": "gmp",
+      "label": "GMP, 제조 품질 표현",
+      "claim_types": [],
+      "patterns": [
+        "GMP",
+        "우수화장품",
+        "CGMP"
+      ],
+      "provisions": [
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 사목"
+        }
+      ],
+      "checks": [
+        "gmp"
+      ],
+      "sweep": true
+    },
+    {
+      "id": "patent",
+      "label": "특허 표현",
+      "claim_types": [
+        "patent"
+      ],
+      "patterns": [
+        "특허"
+      ],
+      "provisions": [
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 사목"
+        },
+        {
+          "document_key": "lawapi:S06",
+          "section": "별표 5 제2호 아목"
+        }
+      ],
+      "checks": [
+        "patent"
+      ],
+      "sweep": true
+    },
+    {
+      "id": "natural_organic",
+      "label": "천연, 유기농 표현",
+      "claim_types": [],
+      "patterns": [
+        "천연",
+        "유기농",
+        "오가닉",
+        "organic",
+        "ISO ?16128",
+        "비건",
+        "vegan"
+      ],
+      "provisions": [
+        {
+          "document_key": "pdf:S01",
+          "section": "8.",
+          "query": "ISO 천연 유기농 지수 표시 광고"
+        },
+        {
+          "document_key": "pdf:S01",
+          "section": "[별표 2] > 3.",
+          "query": "천연유래지수 유기농지수"
+        }
+      ],
+      "checks": [],
+      "sweep": false
+    },
+    {
+      "id": "human_derived",
+      "label": "줄기세포, 인체 유래 성분 표현",
+      "claim_types": [],
+      "patterns": [
+        "줄기세포",
+        "엑소좀",
+        "배양액",
+        "인체 ?유래"
+      ],
+      "provisions": [
+        {
+          "document_key": "pdf:S01",
+          "section": "[별표 1]",
+          "query": "줄기세포 인체 유래 성분 세포 조직 배양액"
+        }
+      ],
+      "checks": [
+        "ingredient"
+      ],
+      "sweep": true
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[project]
+name = "capstone-rag-mcp"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["capstone-shared", "fastmcp==4.1.1", "openai>=2,<3"]
+
+[project.optional-dependencies]
+ingest = ["pdfplumber>=0.11,<1", "sentence-transformers>=5,<6", "torch>=2.4"]
+
+[project.scripts]
+rag-mcp = "capstone_rag_mcp.server:main"
+
+[tool.uv.sources]
+capstone-shared = { workspace = true }
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"

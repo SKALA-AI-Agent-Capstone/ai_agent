@@ -1,0 +1,157 @@
+{
+  "$defs": {
+    "PrecedentHit": {
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "similarity": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Similarity",
+          "type": "number"
+        },
+        "keyword_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keyword Score"
+        },
+        "vector_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vector Score"
+        },
+        "trust_level": {
+          "const": "low",
+          "default": "low",
+          "title": "Trust Level",
+          "type": "string"
+        },
+        "verified": {
+          "const": false,
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        },
+        "document_key": {
+          "title": "Document Key",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "excerpt",
+        "similarity",
+        "document_key",
+        "source_url"
+      ],
+      "title": "PrecedentHit",
+      "type": "object"
+    },
+    "RetrievalMode": {
+      "enum": [
+        "keyword",
+        "hybrid"
+      ],
+      "title": "RetrievalMode",
+      "type": "string"
+    },
+    "RetrievalStatus": {
+      "enum": [
+        "FOUND",
+        "NO_RELEVANT_EVIDENCE",
+        "CORPUS_NOT_INDEXED",
+        "SEARCH_ERROR"
+      ],
+      "title": "RetrievalStatus",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "contract_version": {
+      "default": "0.1.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/RetrievalStatus"
+    },
+    "retrieval_mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RetrievalMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "corpus_versions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Corpus Versions",
+      "type": "array"
+    },
+    "hits": {
+      "items": {
+        "$ref": "#/$defs/PrecedentHit"
+      },
+      "title": "Hits",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "title": "PrecedentSearchResult",
+  "type": "object"
+}

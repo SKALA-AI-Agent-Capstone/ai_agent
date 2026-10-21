@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "TextIssue": {
+      "properties": {
+        "phrase": {
+          "title": "Phrase",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "claimType": {
+          "title": "Claimtype",
+          "type": "string"
+        },
+        "rewrites": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rewrites",
+          "type": "array"
+        }
+      },
+      "required": [
+        "phrase",
+        "reason",
+        "claimType",
+        "rewrites"
+      ],
+      "title": "TextIssue",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/TextIssue"
+      },
+      "title": "Findings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "findings"
+  ],
+  "title": "TextAssessment",
+  "type": "object"
+}

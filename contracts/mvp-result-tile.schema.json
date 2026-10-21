@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "description": "result.tiles의 한 항목. 분석에 쓴 타일의 좌표만 남기고 픽셀은 저장하지 않는다.\nregion은 원본 페이지 기준 0~1 [x0, y0, x1, y1]이고 index는 분석 순서(파일, 페이지, 위에서 아래)다.\nfindings와 visualFindings의 tileId는 이 id 중 하나이거나, 대표 타일을 정할 수 없으면 null이다.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "index": {
+      "minimum": 0,
+      "title": "Index",
+      "type": "integer"
+    },
+    "fileId": {
+      "title": "Fileid",
+      "type": "string"
+    },
+    "fileName": {
+      "title": "Filename",
+      "type": "string"
+    },
+    "page": {
+      "minimum": 1,
+      "title": "Page",
+      "type": "integer"
+    },
+    "region": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "title": "Region",
+      "type": "array"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    }
+  },
+  "required": [
+    "id",
+    "index",
+    "fileId",
+    "fileName",
+    "page",
+    "region"
+  ],
+  "title": "ResultTile",
+  "type": "object"
+}

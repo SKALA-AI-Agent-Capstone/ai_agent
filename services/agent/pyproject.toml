@@ -1,0 +1,32 @@
+[project]
+name = "capstone-agent"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "capstone-shared",
+  "fastapi==0.146.0",
+  "uvicorn>=0.38,<1",
+  "fastmcp==4.1.1",
+  "openai>=2,<3",
+  "langgraph>=1,<2",
+  "langgraph-checkpoint-postgres>=3,<4",
+  "langsmith>=0.14,<1",
+  "Pillow>=11,<13",
+  "pdfplumber>=0.11,<1",
+  "pypdfium2>=4,<6",
+  "pytesseract>=0.3.13,<1",
+  "tiktoken>=0.11,<1",
+]
+
+[project.optional-dependencies]
+graph = ["langgraph>=1,<2", "langgraph-checkpoint-postgres>=3,<4"]
+
+[project.scripts]
+capstone-agent = "capstone_agent.app:main"
+
+[tool.uv.sources]
+capstone-shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"

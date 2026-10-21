@@ -1,0 +1,24 @@
+.env
+.env.*
+!.env.example
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+target/
+.idea/
+.vscode/
+.DS_Store
+data/*
+!data/README.md
+!data/.gitkeep
+reports/
+*.log
+
+# Locally supplied provider credentials
+*.env
+secrets/
+credentials/

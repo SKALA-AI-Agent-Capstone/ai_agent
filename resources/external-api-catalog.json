@@ -1,0 +1,33 @@
+[
+  {
+    "id": "API01", "title": "식약처 기능성화장품 보고품목정보",
+    "official_page": "https://www.data.go.kr/data/15095680/openapi.do",
+    "request_url": "https://apis.data.go.kr/1471000/FtnltCosmRptPrdlstInfoService01/getRptPrdlstInq01",
+    "service_key_env": "MFDS_SERVICE_KEY", "role": "business_realtime",
+    "schema_file": "contracts/external/mfds-report.swagger.json",
+    "note": "보고품목 존재와 공개된 기능 필드의 보조 확인. 심사 품목 전체나 미등재 신제품의 적법성을 보장하지 않는다."
+  },
+  {
+    "id": "API02", "title": "KIPRIS Plus 특허 및 실용 공개, 등록공보",
+    "official_page": "https://plus.kipris.or.kr/eng/popup/service/DBII_000000000000001/view.do",
+    "request_url": "https://plus.kipris.or.kr/kipo-api/kipi/patUtiModInfoSearchSevice/getWordSearch",
+    "service_key_env": "KIPRIS_SERVICE_KEY", "role": "business_realtime",
+    "note": "현재 adapter는 등록 후보와 서지정보 조회다. 청구항 원문 대조는 별도 기능이다."
+  },
+  {
+    "id": "API03", "title": "식약처 화장품 GMP 적합 업체현황",
+    "official_page": "https://www.data.go.kr/data/15111770/openapi.do",
+    "request_url": "https://apis.data.go.kr/1471000/CsmtcsGmpStbltCompInfo/getCsmtcsGmpStbltCompInfo",
+    "service_key_env": "MFDS_SERVICE_KEY", "role": "supporting_reference",
+    "schema_file": "contracts/external/mfds-gmp.swagger.json",
+    "note": "업체명, 제조소 주소와 완제 또는 원료 구분. 개별 광고의 효과나 제품별 시험 결과를 증명하지 않는다."
+  },
+  {
+    "id": "API04", "title": "식약처 화장품 규제정보",
+    "official_page": "https://www.data.go.kr/data/15111773/openapi.do",
+    "request_url": "https://apis.data.go.kr/1471000/CsmtcsReglMaterialInfoService/getCsmtcsReglMaterialInfoService",
+    "service_key_env": "MFDS_SERVICE_KEY", "role": "supporting_reference",
+    "schema_file": "contracts/external/mfds-regulation.swagger.json",
+    "note": "성분 표준명, 영문명과 금지 및 제한 국가. 제품 함량과 광고의 효능 실증 또는 한국 법률 판정을 대신하지 않는다."
+  }
+]

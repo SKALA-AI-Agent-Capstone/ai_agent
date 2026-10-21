@@ -1,0 +1,19 @@
+name: AI service checks
+on:
+  pull_request:
+  push:
+    branches: [main, refactor/service-repository-boundaries]
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+      - run: uv sync --all-packages --frozen
+      - run: uv run --all-packages --frozen pytest
+      - run: uv run --all-packages --frozen python scripts/export_contracts.py --check

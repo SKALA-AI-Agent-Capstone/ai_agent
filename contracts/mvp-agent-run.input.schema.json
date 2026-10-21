@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "AssetRef": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "advertisement",
+            "evidence"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "docType": {
+          "default": "",
+          "title": "Doctype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role"
+      ],
+      "title": "AssetRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "reviewId": {
+      "title": "Reviewid",
+      "type": "string"
+    },
+    "tenantId": {
+      "title": "Tenantid",
+      "type": "string"
+    },
+    "versionNo": {
+      "minimum": 1,
+      "title": "Versionno",
+      "type": "integer"
+    },
+    "runToken": {
+      "minLength": 32,
+      "title": "Runtoken",
+      "type": "string"
+    },
+    "product": {
+      "additionalProperties": true,
+      "title": "Product",
+      "type": "object"
+    },
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/AssetRef"
+      },
+      "maxItems": 15,
+      "title": "Assets",
+      "type": "array"
+    }
+  },
+  "required": [
+    "reviewId",
+    "tenantId",
+    "versionNo",
+    "runToken",
+    "product",
+    "assets"
+  ],
+  "title": "RunRequest",
+  "type": "object"
+}

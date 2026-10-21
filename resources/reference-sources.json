@@ -1,0 +1,259 @@
+[
+  {
+    "id": "S01",
+    "title": "화장품 표시, 광고 관리 지침",
+    "reported_version_date": "2025-08-14",
+    "method": "pdf_page",
+    "official_page": "https://www.mfds.go.kr/brd/m_1060/view.do?seq=15700",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "mfds",
+    "preferred_attachment_keyword": "화장품 표시, 광고 관리 지침",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "official page / downloadable binary needs local run; no original included",
+    "candidate_download_url": "https://www.mfds.go.kr/brd/m_1060/down.do?brd_id=data0011&seq=15700&data_tp=A&file_seq=2",
+    "acquisition": {
+      "method": "pdf",
+      "file": "S01.pdf",
+      "source_type": "guideline",
+      "collection": "rules"
+    }
+  },
+  {
+    "id": "S02",
+    "title": "화장품 광고자문 기준 및 해설서 (2025개정)",
+    "reported_version_date": "2025-11-10",
+    "method": "direct_pdf",
+    "official_page": "https://kcia.or.kr/ad/cs/notice.php?no=17039&type=view",
+    "verified_direct_download_url": "https://kcia.or.kr/inc/down.php?dir=BOARD&file_name=202511_176274028203592_1.pdf&rename=%ED%99%94%EC%9E%A5%ED%92%88+%EA%B4%91%EA%B3%A0+%EC%9E%90%EB%AC%B8+%EA%B8%B0%EC%A4%80%28%ED%95%B4%EC%84%A4%EC%84%9C%29_2025.pdf",
+    "collection": "rules",
+    "provider": "kcia",
+    "preferred_attachment_keyword": "화장품 광고 자문 기준",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "official page / downloadable binary needs local run; no original included",
+    "acquisition": {
+      "method": "pdf",
+      "file": "S02.pdf",
+      "source_type": "association",
+      "collection": "rules",
+      "note": "협회 자문 기준이며 법령과 같은 법적 효력으로 취급하지 않는다."
+    }
+  },
+  {
+    "id": "S03",
+    "title": "화장품 표시, 광고 실증을 위한 시험방법 가이드라인",
+    "reported_version_date": "2024-12-02",
+    "method": "pdf_page",
+    "official_page": "https://www.mfds.go.kr/law/board/boardDetail.do?brdId=data0011&menuKey=38&seq=15567",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "mfds",
+    "preferred_attachment_keyword": "화장품 표시광고 실증",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "official page / downloadable binary needs local run; no original included",
+    "candidate_download_url": "https://www.mfds.go.kr/brd/m_1060/down.do?brd_id=data0011&seq=15567&data_tp=A&file_seq=1",
+    "acquisition": {
+      "method": "pdf",
+      "file": "S03.pdf",
+      "source_type": "guideline",
+      "collection": "rules"
+    }
+  },
+  {
+    "id": "S04",
+    "title": "2026년 화장품 표시광고 지침 및 위반사례 등 안내",
+    "reported_version_date": "2026-03-13",
+    "method": "pdf_page",
+    "official_page": "https://www.mfds.go.kr/brd/m_641/view.do?seq=32476",
+    "verified_direct_download_url": null,
+    "collection": "mixed_rules_cases",
+    "provider": "mfds",
+    "preferred_attachment_keyword": "6. 2026년 화장품 표시광고",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "official page / downloadable binary needs local run; no original included",
+    "candidate_download_url": "https://www.mfds.go.kr/brd/m_641/down.do?brd_id=plc0152&seq=32476&data_tp=A&file_seq=6",
+    "acquisition": {
+      "method": "pdf",
+      "file": "S04.pdf",
+      "source_type": "guideline",
+      "collection": "mixed_rules_cases",
+      "page_ranges": {
+        "rules": [
+          2,
+          7
+        ],
+        "cases": [
+          8,
+          27
+        ]
+      },
+      "note": "정책설명회 자료. 2~7쪽은 지침 개정사항과 판단 기준(rules), 8~27쪽은 위반사례(cases). 사례 쪽은 본문 대부분이 이미지라 제목 위주로 적재된다."
+    }
+  },
+  {
+    "id": "S05",
+    "title": "화장품법 제13조, 제14조",
+    "reported_version_date": "check_current",
+    "method": "law_api",
+    "official_page": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=285353",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "law",
+    "preferred_attachment_keyword": "화장품법",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "requires your LAW_OC key and live API lookup",
+    "acquisition": {
+      "method": "legalize_kr",
+      "paths": [
+        "kr/화장품법/법률.md",
+        "kr/화장품법/시행령.md",
+        "kr/화장품법/시행규칙.md"
+      ],
+      "source_type": "law",
+      "collection": "rules",
+      "note": "legalize-kr의 화장품법 폴더(법률, 시행령, 시행규칙) 전체 조문을 적재한다. 제13조, 제14조는 법률.md에 있다. 기존 law_api 경로를 대신한다."
+    }
+  },
+  {
+    "id": "S06",
+    "title": "화장품법 시행규칙 별표 5",
+    "reported_version_date": "check_current",
+    "method": "pdf_page",
+    "official_page": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=285353",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "law",
+    "preferred_attachment_keyword": "별표 5",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "Known candidate direct URL, not independently downloaded/verified in this environment. Use browser or API annex listing.",
+    "candidate_download_url": "https://www.law.go.kr/flDownload.do?bylClsCd=110201&flSeq=157585857&gubun=",
+    "acquisition": {
+      "method": "legalize_kr+lawapi",
+      "paths": [
+        "kr/화장품법/시행규칙.md"
+      ],
+      "source_type": "regulation",
+      "collection": "rules",
+      "lawapi": {
+        "target": "eflaw",
+        "name": "화장품법 시행규칙",
+        "articles": false,
+        "annexes": [
+          "5"
+        ]
+      },
+      "note": "시행규칙 조문은 legalize-kr, 별표 5는 법제처 API 본문에서 항목(호, 목) 단위로 적재한다."
+    }
+  },
+  {
+    "id": "S07",
+    "title": "화장품 표시, 광고 실증에 관한 규정",
+    "reported_version_date": "check_current",
+    "method": "admrul_api",
+    "official_page": "https://law.go.kr/LSW/admRulInfoP.do?admRulSeq=2100000192523",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "law",
+    "preferred_attachment_keyword": "화장품 표시",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "official page / downloadable binary needs local run; no original included",
+    "acquisition": {
+      "method": "lawapi",
+      "source_type": "regulation",
+      "collection": "rules",
+      "lawapi": {
+        "target": "admrul",
+        "name": "화장품 표시\u00b7광고 실증에 관한 규정",
+        "annexes": null
+      },
+      "note": "식약처 고시. 별표의 표시광고 표현별 실증자료를 행 단위로 적재한다."
+    }
+  },
+  {
+    "id": "S08",
+    "title": "기능성화장품 심사에 관한 규정",
+    "reported_version_date": "2025-12-16",
+    "method": "admrul_api",
+    "official_page": "https://www.mfds.go.kr/brd/m_211/view.do?seq=14958",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "law",
+    "preferred_attachment_keyword": "기능성화장품 심사",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "official page / downloadable binary needs local run; no original included",
+    "acquisition": {
+      "method": "lawapi",
+      "source_type": "regulation",
+      "collection": "rules",
+      "lawapi": {
+        "target": "admrul",
+        "name": "기능성화장품 심사에 관한 규정",
+        "annexes": [
+          "4"
+        ]
+      },
+      "note": "식약처 고시. 별표 1~3은 시험법이라 제외하고 별표 4(자료제출이 생략되는 기능성화장품 성분과 함량)만 적재한다."
+    }
+  },
+  {
+    "id": "S09",
+    "title": "표시, 광고의 공정화에 관한 법률 제3조",
+    "reported_version_date": "check_current",
+    "method": "law_api",
+    "official_page": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1026818965",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "law",
+    "preferred_attachment_keyword": "표시",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "requires your LAW_OC key and live API lookup",
+    "acquisition": {
+      "method": "lawapi",
+      "source_type": "law",
+      "collection": "rules",
+      "lawapi": {
+        "target": "eflaw",
+        "name": "표시ㆍ광고의 공정화에 관한 법률",
+        "annexes": []
+      },
+      "note": "법률 전체 조문을 적재한다."
+    }
+  },
+  {
+    "id": "S10",
+    "title": "화장품 안전기준 등에 관한 규정",
+    "reported_version_date": "check_current",
+    "method": "admrul_api",
+    "official_page": "https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulId=2100000276068",
+    "verified_direct_download_url": null,
+    "collection": "rules",
+    "provider": "law",
+    "preferred_attachment_keyword": "화장품 안전기준",
+    "source_verified": false,
+    "raw_available_in_bundle": false,
+    "notes": "성분 주장 대조용으로 추가. 사용할 수 없는 원료(별표 1)와 사용상 제한이 필요한 원료(별표 2).",
+    "acquisition": {
+      "method": "lawapi",
+      "source_type": "regulation",
+      "collection": "rules",
+      "lawapi": {
+        "target": "admrul",
+        "name": "화장품 안전기준 등에 관한 규정",
+        "annexes": [
+          "1",
+          "2"
+        ]
+      },
+      "note": "식약처 고시. 성분 주장이 금지 또는 제한 원료와 겹치는지 대조하는 데 쓴다."
+    }
+  }
+]

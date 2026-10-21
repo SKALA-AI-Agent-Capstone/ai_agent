@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "reviewId": {
+      "title": "Reviewid",
+      "type": "string"
+    },
+    "tenantId": {
+      "title": "Tenantid",
+      "type": "string"
+    },
+    "versionNo": {
+      "minimum": 1,
+      "title": "Versionno",
+      "type": "integer"
+    },
+    "state": {
+      "enum": [
+        "approved",
+        "rejected",
+        "changes_requested"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "reviewId",
+    "tenantId",
+    "versionNo",
+    "state"
+  ],
+  "title": "ResumeRequest",
+  "type": "object"
+}
