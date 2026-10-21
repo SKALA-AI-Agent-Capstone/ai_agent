@@ -13,8 +13,6 @@ def load_env(path=None):
     path = Path(path) if path else ROOT / '.env'
     if not explicit and not path.is_file():
         path = ROOT.parent / 'backend' / '.env'
-    # Keep existing source PDFs in the integration environment; no customer data is moved.
-    os.environ.setdefault('RAG_DATA_DIR', str(path.parent / 'data'))
     if not path.is_file():
         raise SystemExit('Local env file not found. Run scripts/bootstrap.py first.')
     for raw in path.read_text().splitlines():
@@ -28,3 +26,5 @@ def load_env(path=None):
             os.environ[key.strip()] = value
         else:
             os.environ.setdefault(key.strip(), value)
+    # Respect explicit process and file settings before choosing the sibling data directory.
+    os.environ.setdefault('RAG_DATA_DIR', str(path.parent / 'data'))
