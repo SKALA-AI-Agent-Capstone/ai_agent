@@ -14,8 +14,8 @@ FastAPI Agent, LangGraph, 광고 PDF와 이미지 파싱, OCR와 VLM, Business M
 ## 작업 전
 
 요구사항은 [노션 기획서](https://app.notion.com/p/Agent-3fe616ab8fec80bfb92df115c66aa83d), 데이터 설계는 [노션 ERD](https://app.notion.com/p/Data-ERD-App-State-Vector-DB-3ff616ab8fec81c7b57ac75358ced570)를 확인한다.
-공통 아키텍처와 개발 기록은 [backend 문서](https://github.com/SKALA-AI-Agent-Capstone/backend/tree/refactor/service-repository-boundaries/docs)에 한 번만 관리한다.
-현재 이식 브랜치는 `refactor/service-repository-boundaries`다. 아직 main 반영이나 PR 생성은 하지 않는다.
+공통 아키텍처와 개발 기록은 [backend 문서](https://github.com/SKALA-AI-Agent-Capstone/backend/tree/main/docs)에 한 번만 관리한다.
+저장소 분리는 main에 반영한다. 후속 기능은 main에서 기능 브랜치를 만들고 PR로 검토한다.
 
 ## 개발 환경
 
@@ -37,7 +37,7 @@ python3 scripts/check_backend_registry.py --backend ../backend
 ```
 
 전체 실행은 backend에서 `python3 scripts/bootstrap.py` 후 `docker compose --profile web up --build -d`를 사용한다.
-이식 기간에는 backend README의 두 브랜치와 고정 AI 커밋을 함께 사용한다.
+backend README의 main 실행 절차와 고정 AI 커밋을 함께 사용한다.
 기존 backend/.env, data와 Docker 볼륨을 유지한다. 키나 원본 파일, DB를 복사하거나 초기화하지 않는다.
 
 호스트에서 각 AI 서비스를 따로 켤 때는 backend에서 생성한 환경을 사용한다.
