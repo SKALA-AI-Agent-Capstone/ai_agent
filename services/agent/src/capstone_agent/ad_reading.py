@@ -62,7 +62,8 @@ def line_score(line: dict, text: str) -> float:
     """How well an OCR line spells part of a group: 1 when the whole line is in the group, else the share of the
     line in the longest common run, 0 below the match bar. Used for the position only, never for the wording."""
     seen, target = norm(line["text"]), norm(text)
-    if not seen or not target:
+    # A one-letter line (a list index '2', a stray mark) is in almost every group and would stretch its box.
+    if len(seen) < 2 or not target:
         return 0.0
     if seen in target:
         return 1.0

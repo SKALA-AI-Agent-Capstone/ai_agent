@@ -227,3 +227,9 @@ async def test_a_reread_that_repeats_the_vision_text_confirms_it(monkeypatch):
 
     [block], _ = await read_tile(Provider(), t)
     assert block["text"] == "색이 옅어질 수 있으나" and block["readCheck"]["status"] == "confirmed"
+
+
+def test_one_letter_lines_do_not_join_a_group():
+    lines = [{"text": "2"}, {"text": "20층 보습 20.48% 개선"}, {"text": "3"}]
+    [hits] = assign_lines(["20층 보습 20.48% 개선"], [[1, 3]], lines)
+    assert [l["text"] for l in hits] == ["20층 보습 20.48% 개선"]
