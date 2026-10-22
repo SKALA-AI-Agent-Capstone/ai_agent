@@ -31,10 +31,10 @@ async def test_reads_ad_copy_in_groups_and_leaves_product_label_text_out(monkeyp
             seen["text"] = kwargs["text"]
             assert schema is AdCopy
             return AdCopy(on_product_text=["Pyunkang Yul"], groups=[
-                {"role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box": [40, 60, 800, 150]},
-                {"role": "claim", "segments": ["Pyunkang Yul"], "labels": [], "box": []},  # model repeated the label: code removes it
-                {"role": "condition", "segments": ["*연구 기간 : 2025.02.24~03.14", "20명 대상"], "labels": [], "box": [50, 800, 900, 900]},
-                {"role": "result", "segments": ["12.08%", "눈가 주름 감소"], "labels": ["사용 전", "사용 후"], "box": [0, 0, 1, 1]}])  # too small to be a box
+                {"role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box_numbers": [1], "box": [40, 60, 800, 150]},
+                {"role": "claim", "segments": ["Pyunkang Yul"], "labels": [], "box_numbers": [], "box": []},  # model repeated the label: code removes it
+                {"role": "condition", "segments": ["*연구 기간 : 2025.02.24~03.14", "20명 대상"], "labels": [], "box_numbers": [2], "box": [50, 800, 900, 900]},
+                {"role": "result", "segments": ["12.08%", "눈가 주름 감소"], "labels": ["사용 전", "사용 후"], "box_numbers": [9], "box": [0, 0, 1, 1]}])  # too small to be a box
 
     blocks, warnings = await read_tile(FakeProvider(), t)
     assert [(b["role"], b["text"]) for b in blocks] == [

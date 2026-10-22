@@ -23,6 +23,8 @@ class Group(BaseModel):
     role: Literal["claim", "condition", "result"]
     segments: list[str]
     labels: list[str]
+    # Numbered boxes on the second image that hold this group's letters.
+    box_numbers: list[int]
     # Where the group sits in the first image, [left, top, right, bottom] in 0~1000 of its width and height.
     box: list[float]
 
@@ -159,6 +161,12 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
             continue
         text = " ".join(segments)
         hits = matching_lines(text, lines)
+        # Tesseract often garbles large or styled Korean, so the wording match misses the line. A box the model
+        # named is used when its text still resembles the group a little.
+        for number in group.box_numbers:
+            line = lines[number - 1] if 1 <= number <= len(lines) else None
+            if line and line not in hits and SequenceMatcher(None, norm(line["text"]), norm(text)).ratio() >= 0.3:
+                hits.append(line)
         box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
         words = [w for line in hits for w in line.get("words", [])]
         blocks.append({"id": f"{tile.id}:copy:{n}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
