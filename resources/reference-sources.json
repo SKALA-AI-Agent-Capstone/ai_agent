@@ -42,27 +42,6 @@
     }
   },
   {
-    "id": "S03",
-    "title": "화장품 표시, 광고 실증을 위한 시험방법 가이드라인",
-    "reported_version_date": "2024-12-02",
-    "method": "pdf_page",
-    "official_page": "https://www.mfds.go.kr/law/board/boardDetail.do?brdId=data0011&menuKey=38&seq=15567",
-    "verified_direct_download_url": null,
-    "collection": "rules",
-    "provider": "mfds",
-    "preferred_attachment_keyword": "화장품 표시광고 실증",
-    "source_verified": false,
-    "raw_available_in_bundle": false,
-    "notes": "official page / downloadable binary needs local run; no original included",
-    "candidate_download_url": "https://www.mfds.go.kr/brd/m_1060/down.do?brd_id=data0011&seq=15567&data_tp=A&file_seq=1",
-    "acquisition": {
-      "method": "pdf",
-      "file": "S03.pdf",
-      "source_type": "guideline",
-      "collection": "rules"
-    }
-  },
-  {
     "id": "S04",
     "title": "2026년 화장품 표시광고 지침 및 위반사례 등 안내",
     "reported_version_date": "2026-03-13",
@@ -108,15 +87,19 @@
     "raw_available_in_bundle": false,
     "notes": "requires your LAW_OC key and live API lookup",
     "acquisition": {
-      "method": "legalize_kr",
-      "paths": [
-        "kr/화장품법/법률.md",
-        "kr/화장품법/시행령.md",
-        "kr/화장품법/시행규칙.md"
-      ],
+      "method": "lawapi",
       "source_type": "law",
       "collection": "rules",
-      "note": "legalize-kr의 화장품법 폴더(법률, 시행령, 시행규칙) 전체 조문을 적재한다. 제13조, 제14조는 법률.md에 있다. 기존 law_api 경로를 대신한다."
+      "lawapi": {
+        "target": "eflaw",
+        "name": "화장품법",
+        "statutes": [
+          {"name": "화장품법", "document_key": "lawapi:화장품법/법률"},
+          {"name": "화장품법 시행령", "document_key": "lawapi:화장품법/시행령"},
+          {"name": "화장품법 시행규칙", "document_key": "lawapi:화장품법/시행규칙"}
+        ]
+      },
+      "note": "법제처 API에서 화장품법, 시행령, 시행규칙 현행본 전체 조문을 적재한다. 제13조, 제14조는 화장품법에 있다. 2026-10-22부터 legalize-kr(GitHub) 경로를 대신한다."
     }
   },
   {
@@ -134,10 +117,7 @@
     "notes": "Known candidate direct URL, not independently downloaded/verified in this environment. Use browser or API annex listing.",
     "candidate_download_url": "https://www.law.go.kr/flDownload.do?bylClsCd=110201&flSeq=157585857&gubun=",
     "acquisition": {
-      "method": "legalize_kr+lawapi",
-      "paths": [
-        "kr/화장품법/시행규칙.md"
-      ],
+      "method": "lawapi",
       "source_type": "regulation",
       "collection": "rules",
       "lawapi": {
@@ -148,7 +128,7 @@
           "5"
         ]
       },
-      "note": "시행규칙 조문은 legalize-kr, 별표 5는 법제처 API 본문에서 항목(호, 목) 단위로 적재한다."
+      "note": "시행규칙 조문은 S05의 화장품법 시행규칙 문서에 있고, 여기서는 별표 5만 법제처 API 본문에서 항목(호, 목) 단위로 적재한다."
     }
   },
   {

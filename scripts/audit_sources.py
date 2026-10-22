@@ -47,7 +47,7 @@ def pdf_preview(raw, source, folder):
     chunks=chunk_pages(pages)
     normalize=lambda value:re.sub('[^가-힣a-zA-Z0-9]', '', value)
     head=normalize(' '.join(pages[:3]))
-    expected={'S01':['화장품','관리지침'],'S02':['화장품','광고자문'],'S03':['화장품','시험방법'],
+    expected={'S01':['화장품','관리지침'],'S02':['화장품','광고자문'],
               'S04':['화장품','위반사례'],'S06':['화장품법시행규칙','별표5'],'S08':['기능성화장품','심사에관한규정']}
     if source['id'] in expected and not all(term in head for term in expected[source['id']]):
         raise ValueError('DOCUMENT_TITLE_REQUIRES_CONFIRMATION')

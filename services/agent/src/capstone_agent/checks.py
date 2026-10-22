@@ -2,7 +2,7 @@
 
 functional_report  claimed functional effect vs the MFDS functional cosmetic report for the product
 substantiation     substantiation the rules require vs evidence files submitted with the review
-ingredient         ingredient named in the ad vs 화장품 안전기준 별표 1, 2 and the MFDS regulation list
+ingredient         ingredient named in the ad vs 화장품 안전기준 별표 1, 2
 gmp                "GMP" claim vs the MFDS GMP company list, using the manufacturer from the report
 patent             "특허" claim vs patent numbers found and the KIPRIS result
 
@@ -11,6 +11,7 @@ A check result is something the reviewer verifies, never an automatic violation.
 import asyncio
 from datetime import datetime, timezone
 import re
+from .patent_certificate import patent_numbers
 
 from pydantic import BaseModel
 
@@ -142,26 +143,21 @@ async def ingredient_names(provider, findings: list[dict]) -> dict[str, list[str
 
 
 async def ingredient_check(call, name: str, day: str) -> dict:
-    domestic, foreign = await asyncio.gather(
-        call("rag", "check_ingredient_standard", {"ingredient": name, "review_date": day}),
-        call("business", "lookup_ingredient_regulation", {"ingredient_name": name}), return_exceptions=True)
+    try:
+        domestic = await call("rag", "check_ingredient_standard", {"ingredient": name, "review_date": day})
+    except Exception:
+        domestic = None
     domestic = domestic if isinstance(domestic, dict) else {"status": "error"}
-    foreign = foreign if isinstance(foreign, dict) else {"status": "error"}
-    # Only an exact name match counts; a substring of a longer chemical name is a different substance.
-    exact_items = foreign.get("items", []) if foreign.get("exact") else []
-    countries = sorted({c.strip() for item in exact_items for key in ("PROH_NATIONAL", "LIMIT_NATIONAL")
-                        for c in str(item.get(key) or "").split(",") if c.strip()})
-    detail = {"ingredient": name, "domestic": domestic, "foreignStatus": foreign.get("status"), "foreignCountries": countries[:20]}
+    detail = {"ingredient": name, "domestic": domestic}
     if domestic.get("status") == "prohibited":
         return check("ingredient", "prohibited", f"'{name}'은 화장품 안전기준 별표 1(사용할 수 없는 원료)에 있습니다.",
                      source="화장품 안전기준 등에 관한 규정", detail=detail)
     if domestic.get("status") == "restricted":
         return check("ingredient", "restricted", f"'{name}'은 별표 2(사용상의 제한이 필요한 원료)에 있습니다. 함량과 사용 범위를 확인하세요.",
                      source="화장품 안전기준 등에 관한 규정", detail=detail)
-    if domestic.get("status") in ("error", "not_indexed") and foreign.get("status") in ("error", None):
+    if domestic.get("status") in ("error", "not_indexed"):
         return check("ingredient", "unavailable", f"'{name}' 성분 기준을 조회하지 못했습니다.", detail=detail)
-    note = f" 해외 금지 또는 제한 국가: {', '.join(countries[:5])}." if countries else ""
-    return check("ingredient", "not_listed", f"'{name}'은 국내 사용 금지, 제한 원료 목록에서 찾지 못했습니다 (표기가 다르면 누락될 수 있음).{note}",
+    return check("ingredient", "not_listed", f"'{name}'은 국내 사용 금지, 제한 원료 목록에서 찾지 못했습니다 (표기가 다르면 누락될 수 있음).",
                  source="화장품 안전기준 등에 관한 규정", detail=detail)
 
 
@@ -196,7 +192,7 @@ async def cross_checks(findings: list[dict], *, product: dict, evidence: dict, e
                     gmp_result = check("gmp", "unavailable", "GMP 업체 목록을 조회하지 못했습니다.")
             else:
                 gmp_result = check("gmp", "needs_input", "제조업체를 알 수 없어 GMP 적합 여부를 대조하지 못했습니다. 보고번호나 제조사 정보를 확인하세요.")
-        patent_numbers = re.findall(r"\b10[-– ]\d{7}\b", ad_text)
+        certificate_numbers = patent_numbers(ad_text)
         out, summary = [], {}
         for finding in findings:
             results = []
@@ -215,9 +211,9 @@ async def cross_checks(findings: list[dict], *, product: dict, evidence: dict, e
                 elif kind == "gmp" and gmp_result:
                     results.append(gmp_result)
                 elif kind == "patent":
-                    results.append(check("patent", "needs_input" if not patent_numbers else "evidence_submitted",
+                    results.append(check("patent", "needs_input" if not certificate_numbers else "evidence_submitted",
                                          "특허 표현이 있지만 광고에서 특허번호를 찾지 못했습니다. 번호와 등록 여부를 확인하세요."
-                                         if not patent_numbers else f"특허번호 {', '.join(patent_numbers[:3])}의 KIPRIS 조회 결과를 확인하세요.",
+                                         if not certificate_numbers else f"특허번호 {', '.join(certificate_numbers[:3])}의 KIPRIS 조회 결과를 확인하세요.",
                                          source="KIPRIS Plus"))
             for r in results:
                 summary.setdefault(r["type"], {}).setdefault(r["status"], 0)

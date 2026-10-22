@@ -12,6 +12,8 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
+from .parents import child_section, split_article
+
 BASE = "https://www.law.go.kr/DRF"
 MAX_ANNEX_CHUNK = 1500
 ARTICLE_HEAD = re.compile(r"^\s*(제\d+조(?:의\d+)?)\s*\(([^)]*)\)")
@@ -25,6 +27,13 @@ class LawChunk:
     section: str
     context: str
     body: str
+    children: list["LawChunk"] = field(default_factory=list)  # 항/호 rows stored with parent_chunk_id
+
+
+def with_children(section: str, context: str, body: str) -> LawChunk:
+    return LawChunk(section=section, context=context, body=body,
+                    children=[LawChunk(section=child_section(section, label), context=context, body=part)
+                              for label, part in split_article(body)])
 
 
 @dataclass
@@ -106,7 +115,7 @@ def law_articles(root, law_title: str) -> list[LawChunk]:
                 parts.append(node.text.strip())
         body = clean("\n".join(p for p in parts if p))
         if body and not re.search(r"^\s*제\d+조(?:의\d+)?\s*삭제", body):
-            chunks.append(LawChunk(section=f"{head} ({title})" if title else head, context=law_title, body=body))
+            chunks.append(with_children(f"{head} ({title})" if title else head, law_title, body))
     return chunks
 
 
@@ -119,8 +128,10 @@ def admrul_articles(root, rule_title: str) -> list[LawChunk]:
             continue
         if not match and (len(body) < 60 or re.match(r"^제\d+[장절관]", body)):
             continue  # 장, 절 제목
-        section = f"{match.group(1)} ({match.group(2)})" if match else "본문"
-        chunks.append(LawChunk(section=section, context=rule_title, body=body))
+        if match:
+            chunks.append(with_children(f"{match.group(1)} ({match.group(2)})", rule_title, body))
+        else:
+            chunks.append(LawChunk(section="본문", context=rule_title, body=body))
     return chunks
 
 

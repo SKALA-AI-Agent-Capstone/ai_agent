@@ -8,8 +8,8 @@ DAY = "2026-10-21"
 
 def hit(section, similarity=1.0, retrieval="rule", item=None, **extra):
     return {"source": "화장품법", "version": "2026-10-20 제22113호", "scope": "화장품법 > 제3장", "excerpt": f"{section} 원문",
-            "similarity": similarity, "trust_level": "high", "source_type": "law", "document_key": "legalize-kr:화장품법/법률",
-            "section": section, "page": None, "source_url": "https://github.com/legalize-kr/legalize-kr", "acquisition": "legalize-kr",
+            "similarity": similarity, "trust_level": "high", "source_type": "law", "document_key": "lawapi:화장품법/법률",
+            "section": section, "page": None, "source_url": "https://www.law.go.kr/법령/화장품법", "acquisition": "lawapi",
             "effective_from": "2026-10-20", "effective_until": None, "retrieval": retrieval, "item": item, "related": [], **extra}
 
 
