@@ -85,7 +85,7 @@ async def functional_report(functional_approval_no, product_name):
 
 def parse_patents(xml,number,source):
     result={"id":number,"number":number,"status":"unavailable","source":source,"checkedAt":now(),
-            "match":{"status":"unknown","verdict":"unknown","summary":"청구항 원문 대조는 이번 최소 기능에 포함되지 않습니다.","reason":"청구항 원문 미확보"},
+            "match":{"status":"unknown","verdict":"unknown","summary":"청구항 원문이 없어 광고 주장과 특허 권리범위를 비교하지 못했습니다.","reason":"청구항 원문 미확보"},
             "data":None,"error":None}
     root=ET.fromstring(xml)
     success=root.findtext(".//successYN")
@@ -103,7 +103,8 @@ def parse_patents(xml,number,source):
     if len(matched)!=1:
         return {**result,"error":"NO_EXACT_MATCH_OR_INCOMPLETE_SEARCH"}
     item=matched[0];state=item.findtext("registerStatus","")
-    return {**result,"status":"registered" if state=="등록" else "unavailable",
+    status = "registered" if state == "등록" else "expired" if state == "소멸" else "unavailable"
+    return {**result,"status":status,
         "data":{"title":item.findtext("inventionTitle",""),"inventionTitle":item.findtext("inventionTitle",""),
             "abstract":item.findtext("astrtCont",""),"registerStatus":state,"registerNumber":item.findtext("registerNumber",""),
             "applicant":item.findtext("applicantName",""),"registerDate":item.findtext("registerDate",""),"ipc":item.findtext("ipcNumber","")}}
@@ -166,9 +167,6 @@ MFDS_LISTS={
     "gmp":{"source":"식약처 화장품 GMP 적합 업체현황","env":"MFDS_GMP_URL","match":"ENTP_NAME",
            "url":"https://apis.data.go.kr/1471000/CsmtcsGmpStbltCompInfo/getCsmtcsGmpStbltCompInfo",
            "note":"GMP 적합 업체 목록의 보조 확인이며 제품별 품질이나 광고 효능을 증명하지 않습니다."},
-    "regulation":{"source":"식약처 화장품 규제정보","env":"MFDS_REGULATION_URL","match":"INGR_STD_NAME",
-           "url":"https://apis.data.go.kr/1471000/CsmtcsReglMaterialInfoService/getCsmtcsReglMaterialInfoService",
-           "note":"성분의 해외 금지 및 제한 국가 정보이며 국내 배합한도나 광고 적법성 판정을 대신하지 않습니다."},
 }
 
 

@@ -21,13 +21,5 @@
     "service_key_env": "MFDS_SERVICE_KEY", "role": "supporting_reference",
     "schema_file": "contracts/external/mfds-gmp.swagger.json",
     "note": "업체명, 제조소 주소와 완제 또는 원료 구분. 개별 광고의 효과나 제품별 시험 결과를 증명하지 않는다."
-  },
-  {
-    "id": "API04", "title": "식약처 화장품 규제정보",
-    "official_page": "https://www.data.go.kr/data/15111773/openapi.do",
-    "request_url": "https://apis.data.go.kr/1471000/CsmtcsReglMaterialInfoService/getCsmtcsReglMaterialInfoService",
-    "service_key_env": "MFDS_SERVICE_KEY", "role": "supporting_reference",
-    "schema_file": "contracts/external/mfds-regulation.swagger.json",
-    "note": "성분 표준명, 영문명과 금지 및 제한 국가. 제품 함량과 광고의 효능 실증 또는 한국 법률 판정을 대신하지 않는다."
   }
 ]
