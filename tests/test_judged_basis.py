@@ -128,3 +128,13 @@ def test_problem_span_box_is_the_union_of_the_matching_ocr_words():
                        {"text": "주름", "bbox": [0.31, 0.1, 0.36, 0.12]}]}
     assert jb.span_box("임상으로 입증", block) == [0.1, 0.1, 0.3, 0.12]
     assert jb.span_box("미백", block) is None
+
+
+async def test_a_claim_repeated_in_another_section_is_one_card():
+    texts = [text("t1", "임상으로 입증된 주름 개선"), text("t9", "임상으로 입증된 주름 개선")]
+    rag = Rag([[SUBSTANTIATION]])
+    model = Model([[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}]])
+    out = await judged_basis([finding("f1", "임상으로 입증된 주름 개선", "t1"), finding("f2", "임상으로 입증된 주름  개선", "t9")],
+                             model, call=rag)
+    [card] = out["findings"]
+    assert card["id"] == "f1" and [a["textId"] for a in card["alsoAt"]] == ["t9"]

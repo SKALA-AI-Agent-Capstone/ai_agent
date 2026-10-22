@@ -310,14 +310,18 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
             judgments = await judge(provider, candidates, texts_by_id)
         except Exception:
             judgments, warnings = {}, ["CLAIM_JUDGMENT_FAILED"]
-        kept, dismissed = [], []
+        kept, dismissed, seen = [], [], {}
         for finding in candidates:
             judgment = judgments.get(finding["id"])
             if judgment is not None and not judgment.problem:
                 dismissed.append({"id": finding["id"], "phrase": finding["phrase"], "textId": finding.get("textId"),
                                   "reason": judgment.reason, "source": finding.get("source", "model")})
+            elif (key := squeeze(finding["phrase"])) in seen:
+                # The same claim repeated in another section is one card; its other places are listed on it.
+                seen[key].setdefault("alsoAt", []).append({"textId": finding.get("textId"), "location": finding.get("location")})
             else:
-                kept.append(apply_judgment(finding, judgment, texts_by_id.get(finding.get("textId"))))
+                seen[key] = apply_judgment(finding, judgment, texts_by_id.get(finding.get("textId")))
+                kept.append(seen[key])
         limit = asyncio.Semaphore(4)
 
         async def one(finding):
