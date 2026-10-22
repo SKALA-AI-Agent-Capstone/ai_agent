@@ -41,6 +41,8 @@ AD_ONLY = (
     "제목, 효능과 효과 주장, 수치와 시험 결과, 설문 결과, 시험 조건 각주, 성분이나 기술 소개 문구. "
     "제품 자체에 인쇄된 글자(용기, 상자, 라벨, 포장에 적힌 제품명, 용량, 성분 표기, 슬로건, 로고)는 옮기지 않고 on_product_text에만 따로 적는다. "
     "구분 기준: 사진 속 사물 위에 인쇄된 글자면 제품 표면 글자, 광고 제작자가 이미지 위에 얹은 글자면 광고 문구다. "
+    "제품 표면 글자의 특징: 용기의 곡면을 따라 기울거나 휘어 있고, 작고, 상표나 제품명, 영문 설명, 용량(ml, oz)이다. "
+    "글자를 쓰기 전에 먼저 제품 표면 글자를 모두 on_product_text에 쓰고, 그다음에 남은 광고 문구만 쓴다. 특히 작은 글자인데 제품 속에 있는 문구라면 제외한다. on_product_text에 쓴 글자는 blocks, groups, outside_boxes에 다시 쓰지 않는다. "
     "사진이나 그래프의 내용은 묘사하지 않는다. 글자만 옮긴다. "
 )
 SEGMENTS = (
@@ -58,8 +60,8 @@ class Block(BaseModel):
 
 
 class Reading(BaseModel):
+    on_product_text: list[str]  # first, so the model decides what to exclude before it writes the ad copy
     blocks: list[Block]
-    on_product_text: list[str]
 
 
 class CleanLine(BaseModel):
@@ -84,14 +86,14 @@ class Group(BaseModel):
 
 
 class GroupReading(BaseModel):
+    on_product_text: list[str]  # text printed on the product itself, written first and listed only so the exclusion can be checked
     groups: list[Group]
-    on_product_text: list[str]  # text printed on the product itself, listed only so the exclusion can be checked
 
 
 class BoxReading(BaseModel):
+    on_product_text: list[str]
     blocks: list[BoxBlock]
     outside_boxes: list[str]
-    on_product_text: list[str]
 
 
 # ---------- helpers ----------
@@ -167,7 +169,12 @@ async def method_one(tile, lines):
         Reading, f"OCR 참고 줄:\n{reference}", [data_url(tile.image)])
     calls += 1
     tokens.append(usage)
-    return {"ocr": lines, "cleaned": cleaned, "blocks": [b.model_dump() for b in reading.blocks], "on_product": reading.on_product_text,
+    blocks = []
+    for block in reading.blocks:
+        segments = strip_product(block.segments, reading.on_product_text)
+        if segments:
+            blocks.append({"segments": segments, "source": block.source})
+    return {"ocr": lines, "cleaned": cleaned, "blocks": blocks, "on_product": reading.on_product_text,
             "seconds": round(time.monotonic() - started, 1), "calls": calls, "tokens": tokens}
 
 
@@ -184,13 +191,16 @@ async def method_two(tile, lines):
         BoxReading, f"상자 좌표(구간 픽셀 기준, 너비 {tile.image.width}, 높이 {tile.image.height}):\n{boxes}",
         [data_url(tile.image), data_url(marked)])
     # The model sometimes cites box numbers that were never drawn; keep only real ones and move the rest outside.
-    blocks, outside = [], list(reading.outside_boxes)
+    blocks, outside = [], strip_product(list(reading.outside_boxes), reading.on_product_text)
     for block in reading.blocks:
+        segments = strip_product(block.segments, reading.on_product_text)
+        if not segments:
+            continue
         ids = [i for i in block.box_ids if 1 <= i <= len(lines)]
         if ids:
-            blocks.append({"segments": block.segments, "box_ids": ids})
+            blocks.append({"segments": segments, "box_ids": ids})
         else:
-            outside += block.segments
+            outside += segments
     return {"boxes": lines, "annotated": data_url(marked, 1200), "blocks": blocks,
             "outside": outside, "on_product": reading.on_product_text,
             "seconds": round(time.monotonic() - started, 1), "calls": 1, "tokens": [usage]}
@@ -207,6 +217,18 @@ GROUPING = (
     "사진이나 그래프 안에 들어 있는 짧은 캡션('사용 전' 같은 글자)은 글자 덩어리가 아니라 이미지 묘사에 포함한다. "
     "위에서 아래, 왼쪽에서 오른쪽 순서로 쓴다."
 )
+def strip_product(segments: list[str], on_product: list[str]) -> list[str]:
+    """Drop segments the model itself listed as product-surface text but still repeated in the ad copy."""
+    banned = [norm(x) for x in on_product if norm(x)]
+    kept = []
+    for segment in segments:
+        n = norm(segment)
+        if n and any(n == b or (len(n) >= 6 and (n in b or b in n)) for b in banned):
+            continue
+        kept.append(segment)
+    return kept
+
+
 def norm(text: str) -> str:
     import re
     return re.sub(r"[^0-9A-Za-z가-힣]", "", text).lower()
@@ -248,7 +270,7 @@ async def method_three(tile, lines):
         [data_url(tile.image), data_url(marked)])
     groups = []
     for group in reading.groups:
-        group.segments = [x for x in group.segments if x.strip()]
+        group.segments = strip_product([x for x in group.segments if x.strip()], reading.on_product_text)
         if not group.segments:
             continue  # the model sometimes emits an empty group
         status, hits = verify(" ".join(group.segments), lines)
