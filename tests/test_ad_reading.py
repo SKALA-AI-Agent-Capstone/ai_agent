@@ -97,3 +97,34 @@ def test_each_ocr_line_goes_to_the_group_it_matches_best():
     # '개선 효과' is in both, but it is the whole headline line and only a fragment of the footnote.
     assert [l["text"] for l in head] == ["임 상 으로 검 증 된", "개 선 효과"]
     assert [l["text"] for l in foot] == ["*편강 3종 시리즈 인체피부 개선효과 평가"]
+
+
+async def test_recall_pass_reads_ocr_lines_the_first_read_skipped(monkeypatch):
+    t = tile()
+    width, height = t.source_size
+
+    def lines(_, scale=1.0):
+        if scale != 1.0:
+            return []
+        return [{"id": f"{t.id}:ocr:{i}", "text": text, "ocrConfidence": 90.0, "words": [],
+                 "location": t.location(precise_box=[20/width, y/height, 300/width, (y+30)/height], method="TESSERACT")}
+                for i, (text, y) in enumerate([("2주 안에 개선", 40), ("*연구기관 피부과학연구소", 500)])]
+    monkeypatch.setattr(ad_reading, "local_ocr", lines)
+    calls = []
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            calls.append(kwargs["text"])
+            if len(calls) == 1:  # the first read skips the small footnote
+                return AdCopy(on_product_text=[], groups=[{"role": "claim", "segments": ["2주 안에 개선"], "labels": [],
+                                                          "box_numbers": [1], "box": []}])
+            return AdCopy(on_product_text=[], groups=[
+                {"role": "condition", "segments": ["*연구기관: 피부과학연구소"], "labels": [], "box_numbers": [1], "box": []},
+                {"role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box_numbers": [], "box": []}])  # not anchored
+
+    blocks, warnings = await read_tile(Provider(), t)
+    assert len(calls) == 2 and "1: x 20~300, y 500~530" in calls[1] and "y 40~70" not in calls[1]
+    assert [(b["role"], b["text"]) for b in blocks] == [("claim", "2주 안에 개선"), ("condition", "*연구기관: 피부과학연구소")]
+    assert blocks[1]["location"]["coordinateSource"] == "TESSERACT"
