@@ -226,17 +226,25 @@ def figure_conflict(vision: str, ocr: str) -> bool:
     return any(found.count(n) < read.count(n) for n in set(read))
 
 
-def disagrees(vision: str, ocr: str) -> bool:
-    """The OCR lines under a group do not support its vision read: a figure the OCR does not show, or letters that
-    differ beyond what extra OCR text (list numbers, a neighbouring line) explains."""
+def letters_apart(vision: str, ocr: str) -> int:
+    """Fewest letter edits that turn the vision text into some stretch of the OCR text (extra OCR text around it,
+    such as list numbers or a neighbouring line, costs nothing)."""
     a, b = norm(vision), norm(ocr)
-    if not a or not b:
+    previous = [0] * (len(b) + 1)
+    for i, x in enumerate(a, 1):
+        current = [i] + [0] * len(b)
+        for j, y in enumerate(b, 1):
+            current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (x != y))
+        previous = current
+    return min(previous)
+
+
+def disagrees(vision: str, ocr: str) -> bool:
+    """The OCR lines under a group do not support its vision read. Any letter that differs counts: a similarity
+    ratio let one wrong letter through ('전후' and '진후' for '징후' in a 20-letter line)."""
+    if not norm(vision) or not norm(ocr):
         return False
-    if figure_conflict(vision, ocr):
-        return True
-    if a in b:
-        return False
-    return SequenceMatcher(None, a, b).ratio() < 0.9
+    return figure_conflict(vision, ocr) or letters_apart(vision, ocr) > 0
 
 
 async def reread(provider, tile: Tile, hits: list[dict]) -> str:
@@ -253,7 +261,7 @@ async def reread(provider, tile: Tile, hits: list[dict]) -> str:
 async def check_reading(provider, tile: Tile, text: str, hits: list[dict]) -> tuple[str, dict | None]:
     """OCR and vision read the same letters independently. Agreement passes; a disagreement gets one enlarged
     literal reread. When the reread sides with the OCR letters it replaces the vision text, when it repeats the
-    vision text the OCR was the noisy one (confirmed); otherwise both readings are kept for the reviewer
+    vision text and the OCR was unsure (confirmed); otherwise both readings are kept for the reviewer
     (needs_review). VLMs tend to rewrite odd words into common ones."""
     ocr = " ".join(h["text"] for h in hits)
     if not hits or not disagrees(text, ocr):
@@ -264,9 +272,11 @@ async def check_reading(provider, tile: Tile, text: str, hits: list[dict]) -> tu
         return text, {"status": "needs_review", "vision": text, "ocr": ocr}
     if again and not disagrees(again, ocr) and disagrees(text, again):
         return again, {"status": "corrected", "vision": text, "ocr": ocr}
-    if again and not disagrees(text, again) and not figure_conflict(text, ocr):
-        # Two vision reads agree and the OCR is the odd one out (OCR noise, such as '열어질' for '옅어질').
-        # A figure is never settled this way: two reads against the OCR on a number go to the reviewer.
+    sure = sum(h.get("ocrConfidence", 0) for h in hits) / len(hits) >= 90
+    if again and not disagrees(text, again) and not figure_conflict(text, ocr) and not sure:
+        # Two vision reads agree and the OCR is unsure of its own letters (small gray text, '열어질' for '옅어질').
+        # A confident OCR line that differs is never overruled: a vision model repeats the same plausible
+        # rewrite twice, so both readings go to the reviewer. Figures always do.
         return text, {"status": "confirmed", "ocr": ocr}
     return text, {"status": "needs_review", "vision": text, "ocr": ocr, "reread": again}
 

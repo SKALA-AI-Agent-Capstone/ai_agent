@@ -131,9 +131,9 @@ async def test_recall_pass_reads_ocr_lines_the_first_read_skipped(monkeypatch):
     assert blocks[1]["location"]["coordinateSource"] == "TESSERACT"
 
 
-def paddle_fake(t, lines):
+def paddle_fake(t, lines, confidence=99.0):
     width, height = t.source_size
-    return [{"id": f"{t.id}:pocr:{i}", "text": text, "ocrConfidence": 99.0, "words": [],
+    return [{"id": f"{t.id}:pocr:{i}", "text": text, "ocrConfidence": confidence, "words": [],
              "location": t.location(precise_box=[20/width, y/height, 300/width, (y+30)/height], method="PADDLE_OCR")}
             for i, (text, y) in enumerate(lines)]
 
@@ -205,6 +205,7 @@ def test_paddle_word_boxes_split_a_line_by_character_share():
 
 
 def test_list_numbers_and_neighbour_text_in_the_ocr_are_not_disagreements():
+    assert ad_reading.disagrees("임상으로 검증된 7종 피부 노화 전후 개선 효과", "임상으로 검증된 7종피부노화징후 개선 효과")  # one letter
     assert not ad_reading.disagrees("팔자 주름 9.83% 개선", "3 팔자 주름 9.83% 개선")
     assert not ad_reading.disagrees("원료적 특성에 한함", "상기 내용은 원료적 특성에 한함")
     assert ad_reading.disagrees("탄성 복원 68.91% 개선", "1 탄성 복원 63.91% 개선")
@@ -214,7 +215,7 @@ def test_list_numbers_and_neighbour_text_in_the_ocr_are_not_disagreements():
 async def test_a_reread_that_repeats_the_vision_text_confirms_it(monkeypatch):
     t = tile()
     monkeypatch.setattr(ad_reading.paddle_ocr, "enabled", lambda: True)
-    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines", lambda tile: paddle_fake(tile, [("색이 열어질 수 있으나", 40)]))
+    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines", lambda tile: paddle_fake(tile, [("색이 열어질 수 있으나", 40)], confidence=72.0))
 
     class Provider:
         client = True
@@ -233,3 +234,21 @@ def test_one_letter_lines_do_not_join_a_group():
     lines = [{"text": "2"}, {"text": "20층 보습 20.48% 개선"}, {"text": "3"}]
     [hits] = assign_lines(["20층 보습 20.48% 개선"], [[1, 3]], lines)
     assert [l["text"] for l in hits] == ["20층 보습 20.48% 개선"]
+
+
+async def test_a_confident_ocr_line_is_not_overruled_by_two_matching_vision_reads(monkeypatch):
+    t = tile()
+    monkeypatch.setattr(ad_reading.paddle_ocr, "enabled", lambda: True)
+    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines", lambda tile: paddle_fake(tile, [("7종 피부 노화 징후", 40)]))
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            if schema is AdCopy:
+                return AdCopy(on_product_text=[], groups=[
+                    {"role": "claim", "segments": ["7종 피부 노화 전후"], "labels": [], "box_numbers": [1], "box": []}])
+            return ad_reading.Reread(lines=["7종 피부 노화 전후"])  # the reread repeats the plausible rewrite
+
+    [block], _ = await read_tile(Provider(), t)
+    assert block["readCheck"]["status"] == "needs_review" and block["readCheck"]["ocr"] == "7종 피부 노화 징후"
