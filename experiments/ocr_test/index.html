@@ -123,10 +123,12 @@ function methodTwo(m) {
 function methodThree(m) {
   if (m.error) return `<p class="error">${esc(m.error)}</p>`
   const STATUS = { confirmed: '<span class="tag ok">OCR 확인</span>', number_mismatch: '<span class="tag warn">숫자 불일치</span>', vision_only: '<span class="tag vis">비전만</span>' }
-  const ROLE = { claim: '주장', condition: '조건', result: '결과', product: '제품' }
+  const ROLE = { claim: '주장', condition: '조건', result: '결과' }
   const groups = m.groups.length ? m.groups.map((g) => `<div class="block"><span class="tag role">${ROLE[g.role] || g.role}</span>${STATUS[g.status] || ''}${g.box_ids.length ? `<span class="tag box">상자 ${g.box_ids.join(', ')}</span>` : ''}${g.segments.map((x) => `<span class="seg">${esc(x)}</span>`).join(' ')}${g.labels?.length ? `<span class="label">[${g.labels.map(esc).join(', ')}]</span>` : ''}</div>`).join('') : '<p class="meta">글자 없음</p>'
   const counts = ['confirmed', 'number_mismatch', 'vision_only'].map((k) => `${{ confirmed: '확인', number_mismatch: '숫자 불일치', vision_only: '비전만' }[k]} ${m.groups.filter((g) => g.status === k).length}`).join(', ')
-  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 덩어리 ${m.groups.length}개 (${counts})</div>${groups}${images(m.images)}`
+  const skipped = `<details><summary>제품 표면 글자로 제외한 것 (${m.on_product.length})</summary><p>${m.on_product.map((x) => `<span class="seg">${esc(x)}</span>`).join(' ') || '없음'}</p></details>`
+  const forward = `<details><summary>뒤로 넘기는 것 (광고 문구 ${m.forward.copy.length}, 시각 ${m.forward.visuals.length})</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(m.forward, null, 1))}</pre></details>`
+  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 덩어리 ${m.groups.length}개 (${counts})</div>${groups}${images(m.images)}${skipped}${forward}`
 }
 function render(data) {
   const sum = (key, f) => data.sections.reduce((a, s) => a + (s[key].error ? 0 : f(s[key])), 0)
