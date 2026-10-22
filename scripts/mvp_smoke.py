@@ -118,21 +118,16 @@ def main(require_queue=False):
                 return
             time.sleep(1)
         raise AssertionError(f"Queue {kind} job for version {no} did not finish: {row}")
-    def wait_resume(no):
-        deadline=time.monotonic()+100
-        approval=None
-        while time.monotonic()<deadline:
-            response=call("GET",f"/reviews/{rid}",author)
-            assert response.status_code==200,response.text
-            version=next(v for v in response.json()["versions"] if v["no"]==no)
-            approval=version["approval"]
-            assert approval["state"]=="approved",approval
-            state=approval.get("agentResume")
-            if state=="completed":
-                return
-            assert state=="pending",("Unexpected resume state",approval)
-            time.sleep(1)
-        raise AssertionError(f"Agent resume for version {no} timed out: {approval}")
+    def resume_jobs():
+        """2026-10-22 review approval was removed, so the Backend must never queue an Agent resume."""
+        if not require_queue:
+            return 0
+        with psycopg.connect(host="127.0.0.1",port=int(os.getenv("POSTGRES_PORT","55432")),
+                dbname=os.getenv("POSTGRES_DB","beauty_capstone"),user="app_user",
+                password=os.environ["APP_DB_PASSWORD"],connect_timeout=5) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT count(*) FROM app.review_jobs WHERE review_id=%s::uuid AND kind='resume'",(rid,))
+                return cursor.fetchone()[0]
     try:
         review=wait(1);version=review["versions"][-1];result=version["result"]
         verify_queue(1)
@@ -148,24 +143,17 @@ def main(require_queue=False):
         assert "runToken" not in json.dumps(review)
         checks.append("real PNG and PDF bytes, local OCR, evidence via authenticated MCP")
         assert call("GET",f"/reviews/{rid}",other["accessToken"]).status_code==404
-        assert call("POST",f"/reviews/{rid}/decision",author,json={"versionNo":1,"state":"approved","comment":"synthetic"}).status_code==403
-        assert call("POST",f"/reviews/{rid}/decision",reviewer,json={"versionNo":1,"state":"approved","comment":""}).status_code==400
-        response=call("POST",f"/reviews/{rid}/decision",reviewer,json={"versionNo":1,"state":"approved","comment":"Synthetic manual check; no legal basis was attached."})
+        # The finished analysis is the report: no review approval, completion state or re-review.
+        response=call("GET",f"/reviews/{rid}",reviewer)
         assert response.status_code==200,response.text
-        approval=response.json()["versions"][-1]["approval"]
-        assert approval["state"]=="approved",approval
-        assert approval.get("agentResume") in {"pending","completed"},approval
-        wait_resume(1)
-        verify_queue(1,"resume")
-        assert balance()==2*review_cost,"Agent resume changed the settled credits"
-        checks.append("tenant isolation, role check, persisted HITL and PostgreSQL resume")
-        upload(f"/reviews/{rid}/re-review");review=wait(2)
-        verify_queue(2)
-        assert balance()==2*review_cost,"Unconfigured re-review did not return the reserved credits"
-        assert review["versions"][0]["approval"]["state"]=="approved"
-        assert review["versions"][1]["approval"]["state"]=="pending"
-        assert call("POST",f"/reviews/{rid}/decision",reviewer,json={"versionNo":1,"state":"approved","comment":"old version"}).status_code==409
-        checks.append("new version with independent approval history")
+        detail=response.json()
+        assert detail["hitl"]=={"violationCount":len(detail["violations"]),"undecidedCount":len(detail["violations"])},detail["hitl"]
+        assert "approval" not in detail["versions"][-1],detail["versions"][-1].keys()
+        assert call("POST",f"/reviews/{rid}/decision",reviewer,json={"versionNo":1,"state":"approved","comment":"x"}).status_code==404
+        assert call("POST",f"/reviews/{rid}/re-review",author).status_code in {404,405}
+        assert resume_jobs()==0,"Backend queued an Agent resume after approval was removed"
+        assert balance()==2*review_cost,"Reading the report changed the settled credits"
+        checks.append("tenant isolation, report without review approval, removed decision and re-review endpoints")
         sources = call("GET", "/reference-sources", token).json()["sources"]
         assert {"S05", "S06", "S10"} <= {source["id"] for source in sources}
         assert call("DELETE","/users/logout",other["accessToken"]).status_code==200
@@ -177,7 +165,7 @@ def main(require_queue=False):
     assert call("GET",f"/reviews/{rid}",author).status_code==404
     checks.append("review deletion")
     if require_queue:
-        checks.append("RabbitMQ-backed run jobs for both versions and the approval resume job reached done once")
+        checks.append("RabbitMQ-backed run job reached done once and no resume job was queued")
     print(json.dumps({"checks":checks,"paid_model_calls":0,"customer_files_used":0},ensure_ascii=False,indent=2))
 
 
