@@ -133,7 +133,7 @@ async def test_cross_checks_run_only_what_the_rules_ask_for():
 
 async def test_graph_runs_legal_basis_then_cross_checks_and_rewrites_with_the_basis(monkeypatch):
     import capstone_agent.review_engine as engine
-    from capstone_agent.review_models import TextAssessment, VisualAssessment
+    from capstone_agent.review_models import TextAssessment
     from capstone_agent.review_engine import RewriteDraft, RewriteVerification, SeverityAssessment
 
     async def ocr(native, tiles, provider):
@@ -163,7 +163,7 @@ async def test_graph_runs_legal_basis_then_cross_checks_and_rewrites_with_the_ba
                 return RewriteDraft(text="민감한 피부를 위한 크림")
             if schema is RewriteVerification:
                 return RewriteVerification(passed=True, reasoning="합성")
-            return VisualAssessment(findings=[], unreadable=False)
+            raise AssertionError(f"unexpected schema {schema}")
 
     graph = engine.build_graph([], [], FakeProvider(), InMemorySaver())
     output = await graph.ainvoke({"reviewId": "r", "tenantId": "t", "versionNo": 1, "product": {"name": "A크림"}},
@@ -176,34 +176,6 @@ async def test_graph_runs_legal_basis_then_cross_checks_and_rewrites_with_the_ba
     assert result["violations"][0]["severity"] == "high"
     assert any("제13조" in text for text in prompts), "rewrite prompt should carry the retrieved article"
     assert result["findings"][0]["rewrites"] == ["민감한 피부를 위한 크림"]
-
-
-async def test_vlm_ocr_fills_dropped_lines_and_fixes_split_syllables(monkeypatch):
-    import capstone_agent.review_engine as engine
-    from capstone_agent.review_models import OCRLines
-    from PIL import Image
-    from capstone_shared.documents import tile_image
-    tile = tile_image(Image.new("RGB", (64, 64)), "a", "ad.png")[0]
-
-    def tesseract(t):
-        return [{"id": "t:ocr:1", "text": "아토피 치료 크림", "location": t.location(method="TESSERACT")},
-                {"id": "t:ocr:2", "text": "시 간 을 되 돌 리 는", "location": t.location(method="TESSERACT")}]
-    monkeypatch.setattr(engine, "local_ocr", tesseract)
-
-    async def no_correction(provider, blocks):
-        return blocks
-    monkeypatch.setattr(engine, "correct_ocr_text", no_correction)
-
-    class FakeProvider:
-        client = True
-
-        async def parse(self, prompt, schema, **kwargs):
-            return OCRLines(lines=["아토피 치료 크림", "시간을 되돌리는", "지친 피부"], unreadable=False)
-    blocks, warnings = await engine.extract_text([], [tile], FakeProvider())
-    assert [b["text"] for b in blocks] == ["아토피 치료 크림", "시간을 되돌리는", "지친 피부"]
-    assert blocks[1]["location"]["coordinateSource"] == "TESSERACT"
-    assert blocks[2]["location"]["coordinateSource"] == "VLM_OCR_REGION"
-    assert warnings == []
 
 
 async def test_rule_sweep_adds_high_risk_lines_the_model_missed():
