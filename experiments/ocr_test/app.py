@@ -76,6 +76,17 @@ class BoxBlock(BaseModel):
     box_ids: list[int]
 
 
+class Group(BaseModel):
+    role: Literal["claim", "condition", "result", "product"]
+    segments: list[str]
+    labels: list[str]
+
+
+class GroupReading(BaseModel):
+    groups: list[Group]
+    images: list[str]
+
+
 class BoxReading(BaseModel):
     blocks: list[BoxBlock]
     outside_boxes: list[str]
@@ -184,6 +195,76 @@ async def method_two(tile, lines):
             "seconds": round(time.monotonic() - started, 1), "calls": 1, "tokens": [usage]}
 
 
+GROUPING = (
+    "글자는 이미지에 실제로 보이는 그대로 옮긴다. 띄어쓰기만 바르게 고치고 단어나 숫자를 바꾸거나 추측해서 채우지 않는다. 읽을 수 없으면 [판독 불가]. "
+    "글자를 **의미 덩어리**로 묶는다. 덩어리는 읽는 사람이 하나의 항목으로 이해하는 단위이고 줄 단위가 아니다. "
+    "큰 수치, 그 라벨, 평가 방법 괄호, 짝이 되는 그래프의 '사용 전/후' 라벨은 하나의 덩어리다. 예: ['12.08%', '눈가 주름 감소', '(피부노화지수 평가)']. "
+    "반복되는 라벨(사용 전, 사용 후)은 덩어리마다 따로 쓰지 말고 해당 덩어리의 labels에 한 번만 쓴다. "
+    "제목과 부연 문장은 한 덩어리, 각주(시험 기관, 기간, 대상, 기준)는 한 덩어리로 묶는다. "
+    "덩어리마다 role을 정한다: claim(주장), condition(시험 조건 각주), result(수치나 설문 결과), product(제품 정보). "
+    "사진이나 그래프 안에 들어 있는 짧은 캡션('사용 전' 같은 글자)은 글자 덩어리가 아니라 이미지 묘사에 포함한다. "
+    "위에서 아래, 왼쪽에서 오른쪽 순서로 쓴다."
+)
+VISUAL_FACTS = (
+    "images에는 효능 판단에 쓰일 시각 정보만 사실대로 쓴다. "
+    "전후 비교 사진: 어느 부위인지, 두 사진에서 보이는 피부 상태 차이(주름, 모공, 색, 질감), 조명, 각도, 확대 정도가 같은지 다른지. "
+    "그래프나 차트: 종류, 비교하는 두 대상(사용 전, 사용 후), 읽히는 수치와 단위, 축. "
+    "제형이나 질감: 크림, 세럼 등 제형과 발림, 텍스처. 인물의 피부 모습이나 사용 장면. "
+    "글자가 어디에 있는지, 글자 줄 수, 패널이나 카드의 배치와 개수, 배경, 장식선, 로고 배치, 용기의 단순 모양은 쓰지 않는다. 그래프는 무엇을 비교하는지만 쓴다. 효과나 개선 여부, 과장 같은 판단과 평가도 쓰지 않는다. "
+    "보이는 차이만 쓴다. 해당하는 시각 요소가 없으면 빈 목록이다."
+)
+
+
+def norm(text: str) -> str:
+    import re
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", text).lower()
+
+
+def numbers(text: str) -> set[str]:
+    import re
+    return set(re.findall(r"\d+(?:[.,]\d+)?", text))
+
+
+def verify(group_text: str, lines):
+    """Code check of one group against Tesseract lines. Returns (status, box ids)."""
+    from difflib import SequenceMatcher
+    target = norm(group_text)
+    if not target:
+        return "vision_only", []
+    hits, status = [], "vision_only"
+    for i, line in enumerate(lines, 1):
+        seen = norm(line["text"])
+        if not seen:
+            continue
+        if seen in target or SequenceMatcher(None, seen, target).find_longest_match(0, len(seen), 0, len(target)).size >= max(3, int(len(seen) * 0.6)):
+            hits.append(i)
+    if hits:
+        ocr_numbers = set().union(*(numbers(lines[i - 1]["text"]) for i in hits))
+        status = "confirmed" if numbers(group_text) <= ocr_numbers or not numbers(group_text) else "number_mismatch"
+    return status, hits
+
+
+async def method_three(tile, lines):
+    started = time.monotonic()
+    marked = annotate(tile.image, lines)
+    boxes = "\n".join(f"{i}: x {l['box'][0]}~{l['box'][2]}, y {l['box'][1]}~{l['box'][3]}" for i, l in enumerate(lines, 1)) or "(상자 없음)"
+    reading, usage = await parse(
+        VISION_MODEL,
+        "화장품 광고 이미지의 한 구간이다. 첫 이미지는 원본, 두 번째는 글자가 있을 만한 위치에 번호 상자를 그린 것이다. "
+        "상자는 읽을 위치를 알려 주는 참고일 뿐이니 글자는 원본에서 직접 읽고, 상자가 놓친 글자도 읽는다. " + GROUPING + " " + VISUAL_FACTS,
+        GroupReading, f"상자 좌표(구간 픽셀 기준, 너비 {tile.image.width}, 높이 {tile.image.height}):\n{boxes}",
+        [data_url(tile.image), data_url(marked)])
+    groups = []
+    for group in reading.groups:
+        group.segments = [x for x in group.segments if x.strip()]
+        if not group.segments:
+            continue  # the model sometimes emits an empty group
+        status, hits = verify(" ".join(group.segments), lines)
+        groups.append({**group.model_dump(), "status": status, "box_ids": hits})
+    return {"boxes": lines, "annotated": data_url(marked, 1200), "groups": groups, "images": reading.images,
+            "seconds": round(time.monotonic() - started, 1), "calls": 1, "tokens": [usage]}
+
+
 async def safely(coro):
     try:
         return await coro
@@ -193,8 +274,10 @@ async def safely(coro):
 
 async def section(index, tile):
     lines = await asyncio.to_thread(ocr_lines, tile)
-    first, second = await asyncio.gather(safely(method_one(tile, lines)), safely(method_two(tile, lines)))
-    return {"index": index, "box": list(tile.box), "image": data_url(tile.image, 1200), "method1": first, "method2": second}
+    first, second, third = await asyncio.gather(
+        safely(method_one(tile, lines)), safely(method_two(tile, lines)), safely(method_three(tile, lines)))
+    return {"index": index, "box": list(tile.box), "image": data_url(tile.image, 1200),
+            "method1": first, "method2": second, "method3": third}
 
 
 app = FastAPI(title="OCR test")
