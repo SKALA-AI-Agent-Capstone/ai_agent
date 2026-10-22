@@ -23,6 +23,8 @@ class Group(BaseModel):
     role: Literal["claim", "condition", "result"]
     segments: list[str]
     labels: list[str]
+    # Where the group sits in the first image, [left, top, right, bottom] in 0~1000 of its width and height.
+    box: list[float]
 
 
 class AdCopy(BaseModel):
@@ -66,6 +68,30 @@ def union_box(lines: list[dict]):
     if not boxes:
         return None
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+
+
+def vision_box(tile: Tile, box: list[float]):
+    """A model box (0~1000 of the section) as a page-ratio bbox, or None when it is not a usable box."""
+    if len(box) != 4 or not all(0 <= v <= 1000 for v in box):
+        return None
+    x0, y0, x1, y1 = box
+    if x1 - x0 < 5 or y1 - y0 < 5:
+        return None
+    width, height = tile.source_size
+    left, top = tile.box[0], tile.box[1]
+    return [(left + x0 / 1000 * tile.image.width) / width, (top + y0 / 1000 * tile.image.height) / height,
+            (left + x1 / 1000 * tile.image.width) / width, (top + y1 / 1000 * tile.image.height) / height]
+
+
+def merge_boxes(seen, model):
+    """Tesseract lines give the exact edges; the model box adds lines Tesseract missed, but only when it overlaps them."""
+    if not model:
+        return seen, "TESSERACT" if seen else None
+    if not seen:
+        return model, "VISION"
+    if min(seen[2], model[2]) > max(seen[0], model[0]) and min(seen[3], model[3]) > max(seen[1], model[1]):
+        return [min(seen[0], model[0]), min(seen[1], model[1]), max(seen[2], model[2]), max(seen[3], model[3])], "TESSERACT+VISION"
+    return seen, "TESSERACT"
 
 
 def section_box(tile: Tile, line: dict) -> list[float]:
@@ -133,7 +159,7 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
             continue
         text = " ".join(segments)
         hits = matching_lines(text, lines)
-        box = union_box(hits)
+        box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
         blocks.append({"id": f"{tile.id}:copy:{n}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
-                       "location": tile.location(precise_box=box, method="TESSERACT" if box else "VISION_COPY_REGION")})
+                       "location": tile.location(precise_box=box, method=method or "VISION_COPY_REGION")})
     return blocks, warnings

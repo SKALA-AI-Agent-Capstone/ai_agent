@@ -1,3 +1,4 @@
+import pytest
 from PIL import Image
 
 from capstone_agent import ad_reading
@@ -30,10 +31,10 @@ async def test_reads_ad_copy_in_groups_and_leaves_product_label_text_out(monkeyp
             seen["text"] = kwargs["text"]
             assert schema is AdCopy
             return AdCopy(on_product_text=["Pyunkang Yul"], groups=[
-                {"role": "claim", "segments": ["2주 안에 개선"], "labels": []},
-                {"role": "claim", "segments": ["Pyunkang Yul"], "labels": []},  # model repeated the label: code removes it
-                {"role": "condition", "segments": ["*연구 기간 : 2025.02.24~03.14", "20명 대상"], "labels": []},
-                {"role": "result", "segments": ["12.08%", "눈가 주름 감소"], "labels": ["사용 전", "사용 후"]}])
+                {"role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box": [40, 60, 800, 150]},
+                {"role": "claim", "segments": ["Pyunkang Yul"], "labels": [], "box": []},  # model repeated the label: code removes it
+                {"role": "condition", "segments": ["*연구 기간 : 2025.02.24~03.14", "20명 대상"], "labels": [], "box": [50, 800, 900, 900]},
+                {"role": "result", "segments": ["12.08%", "눈가 주름 감소"], "labels": ["사용 전", "사용 후"], "box": [0, 0, 1, 1]}])  # too small to be a box
 
     blocks, warnings = await read_tile(FakeProvider(), t)
     assert [(b["role"], b["text"]) for b in blocks] == [
@@ -42,8 +43,12 @@ async def test_reads_ad_copy_in_groups_and_leaves_product_label_text_out(monkeyp
     assert len(seen["images"]) == 2 and seen["images"][0].startswith("data:image/jpeg")  # original and the box drawing
     assert "1: x 20~300, y 40~80" in seen["text"]  # boxes are in section pixels
     # Position comes from the matching Tesseract line, never from the wording the model wrote.
-    assert blocks[0]["location"]["coordinateSource"] == "TESSERACT" and blocks[0]["location"]["bbox"] is not None
-    assert blocks[1]["location"]["coordinateSource"] == "VISION_COPY_REGION" and blocks[1]["location"]["bbox"] is None
+    # A model box that overlaps the Tesseract line widens it; one with no Tesseract line is used as it is.
+    assert blocks[0]["location"]["coordinateSource"] == "TESSERACT+VISION"
+    assert blocks[0]["location"]["bbox"] == pytest.approx([0.04, 0.06, 0.8, 0.15])  # union of the line and the model box
+    assert blocks[1]["location"]["coordinateSource"] == "VISION"
+    assert blocks[1]["location"]["bbox"] == pytest.approx([0.05, 0.8, 0.9, 0.9])
+    assert blocks[2]["location"]["coordinateSource"] == "VISION_COPY_REGION" and blocks[2]["location"]["bbox"] is None
     assert warnings == []
 
 
