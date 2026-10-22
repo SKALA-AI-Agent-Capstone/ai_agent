@@ -152,3 +152,27 @@ async def test_judgment_sees_the_section_and_the_card_keeps_its_footnote():
     listing = next(t for name, t in model.seen if name == "ClaimJudgments")
     assert "같은 구간: (주장) 임상으로 검증된" in listing and "(조건 각주) *인체적용시험 20명" in listing
     assert out["findings"][0]["conditions"] == ["*인체적용시험 20명, 25.02.24~25.03.14"]
+
+
+async def test_claims_of_one_section_and_type_share_one_tool_loop_but_are_verified_one_by_one():
+    loc = {"kind": "image", "fileId": "a", "page": 1, "bbox": None, "tileId": "a:p1:t2"}
+    texts = [{"id": "t1", "text": "탄성 복원 63.91% 개선", "role": "result", "location": loc},
+             {"id": "t2", "text": "눈가 주름 12.08% 개선", "role": "result", "location": loc}]
+    rag = Rag([[SUBSTANTIATION]])
+
+    class Judge(Model):
+        async def parse(self, prompt, schema, **kwargs):
+            self.seen.append((schema.__name__, kwargs["text"]))
+            if schema is ClaimJudgments:
+                return ClaimJudgments(judgments=[
+                    {"id": fid, "problem": True, "claimType": "clinical", "span": "", "purpose": "수치 실증", "reason": "수치"}
+                    for fid in ("f1", "f2")] + [  # the fake rule sweep line is not a concern
+                    {"id": "rule-1", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "", "reason": "-"}])
+            return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
+
+    model = Judge([])
+    out = await judged_basis([finding("f1", "탄성 복원 63.91% 개선", "t1"), finding("f2", "눈가 주름 12.08% 개선", "t2")],
+                             model, texts=texts, call=rag)
+    assert [t for t, _ in rag.calls].count("search_regulations") == 1  # one loop for the bundle
+    assert sum(1 for name, _ in model.seen if name == "BasisCheck") == 2  # each claim verified on its own
+    assert all(f["basisTrace"]["bundle"] == ["f1", "f2"] and f["legalSearch"] == "verified" for f in out["findings"])

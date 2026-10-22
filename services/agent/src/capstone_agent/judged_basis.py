@@ -3,10 +3,11 @@
 1. judge    One model call reads every candidate claim (model extraction and rule sweep) with its line and decides
             whether it is a regulatory concern at all, which words cause it (span) and what the basis must show
             (purpose). Candidates judged not a concern leave the findings and are kept as dismissed.
-2. gather   Per kept claim, a tool loop: the model picks rag-mcp tools (claim rules, statute search, case search)
+2. gather   Per bundle (claims of one section and one claim type), one tool loop: the model picks rag-mcp
+            tools (claim rules, statute search, case search)
             and writes the search query for its purpose. Guardrails: MAX_BASIS_CALLS calls, MAX_SAME_BASIS_TOOL
             per tool, BASIS_LOOP_SECONDS. The phrase and review date are filled in by code, never by the model.
-3. verify   A separate call that sees only the ad phrase, its line and the candidate texts (not the judgment or the
+3. verify   Per claim, a separate call that sees only the ad phrase, its line and the candidate texts (not the judgment or the
             loop) decides for each candidate whether it governs this expression and quotes the sentence that does.
             A quote that is not in the candidate text is rejected by code. When nothing passes, the loop runs once
             more with the rejected candidates named, and the new candidates are verified the same way.
@@ -275,33 +276,66 @@ def verified_basis(found: Candidates, verdicts: dict[str, BasisVerdict]) -> tupl
     return basis, references
 
 
-async def basis_for(provider, call, finding: dict, line: str, day: str) -> dict:
+def bundle_key(finding: dict, texts_by_id: dict) -> tuple:
+    """Claims of one section and one claim type share their basis: the seven figures under one clinical headline
+    rest on the same provisions and the same test footnote."""
+    own = texts_by_id.get(finding.get("textId")) or {}
+    tile = (own.get("location") or finding.get("location") or {}).get("tileId")
+    return tile, finding.get("claimType")
+
+
+def bundle_view(bundle: list[dict]) -> dict:
+    """What the tool loop sees for a bundle: its phrases, the shared reason and purposes."""
+    purposes = list(dict.fromkeys(f.get("purpose") for f in bundle if f.get("purpose")))
+    return {"phrase": " / ".join(f["phrase"] for f in bundle[:8]), "claimType": bundle[0].get("claimType"),
+            "reason": bundle[0].get("reason", ""), "purpose": " / ".join(purposes[:3])}
+
+
+async def rule_metadata(call, finding: dict, day: str) -> dict:
+    """Cross-checks need the rule table's required checks and evidence for each claim's own wording."""
+    meta = {"checks": set(), "evidence": []}
+    try:
+        result = await call("rag", "lookup_claim_rules", {"phrase": finding["phrase"],
+                            "claim_type": finding.get("claimType"), "review_date": day})
+        for match in result.get("matches", []):
+            meta["checks"] |= set(match["checks"])
+            meta["evidence"] += [{**e, "ruleId": match["rule_id"]} for e in match["evidence_requirements"]]
+    except Exception:
+        pass
+    return meta
+
+
+async def basis_for_bundle(provider, call, bundle: list[dict], lines: list[str], day: str) -> list[dict]:
+    """One tool loop for the bundle, then an independent verification per claim over the bundle's candidates.
+    When no claim of the bundle is verified, the loop runs once more with the rejected candidates named."""
     found = Candidates()
-    trace = await gather(provider, call, finding, line, day, found)
+    view = bundle_view(bundle)
+    trace = await gather(provider, call, view, " / ".join(dict.fromkeys(lines))[:600], day, found)
     first = list(found.items)
-    verdicts = await verify(provider, finding, line, found, first)
+    verdicts = list(await asyncio.gather(*(verify(provider, f, line, found, first) for f, line in zip(bundle, lines))))
     retried = False
-    if not verdicts and first:
+    if first and not any(verdicts):
         retried = True
-        trace += await gather(provider, call, finding, line, day, found, rejected=found.view(first))
-        verdicts = await verify(provider, finding, line, found, [c for c in found.items if c not in first])
-    if not found.rule_called:
-        # Cross-checks need the rule table's required checks and evidence even when the model did not cite a rule.
-        try:
-            found.rule_called = True
-            result = await call("rag", "lookup_claim_rules", {"phrase": finding["phrase"],
-                                "claim_type": finding.get("claimType"), "review_date": day})
-            for match in result.get("matches", []):
-                found.rule_meta["checks"] |= set(match["checks"])
-                found.rule_meta["evidence"] += [{**e, "ruleId": match["rule_id"]} for e in match["evidence_requirements"]]
-        except Exception:
-            pass
-    basis, references = verified_basis(found, verdicts)
-    return {"basis": basis, "references": references, "rules": found.rule_meta["rules"],
-            "evidence": found.rule_meta["evidence"], "checks": sorted(found.rule_meta["checks"]),
-            "missing": found.rule_meta["missing"],
-            "trace": {"tools": trace, "candidates": len(found.items), "verified": len(verdicts), "retried": retried},
-            "toolErrors": sum(1 for t in trace if t.get("error"))}
+        trace += await gather(provider, call, view, " / ".join(dict.fromkeys(lines))[:600], day, found,
+                              rejected=found.view(first))
+        new = [c for c in found.items if c not in first]
+        verdicts = list(await asyncio.gather(*(verify(provider, f, line, found, new) for f, line in zip(bundle, lines))))
+    results = []
+    for finding, verdict in zip(bundle, verdicts):
+        meta = await rule_metadata(call, finding, day)
+        basis, references = verified_basis(found, verdict)
+        results.append({"basis": basis, "references": references, "rules": found.rule_meta["rules"],
+                        "evidence": meta["evidence"], "checks": sorted(meta["checks"] | found.rule_meta["checks"]),
+                        "missing": found.rule_meta["missing"],
+                        "trace": {"tools": trace, "bundle": [f["id"] for f in bundle], "candidates": len(found.items),
+                                  "verified": len(verdict), "retried": retried},
+                        "toolErrors": sum(1 for t in trace if t.get("error"))})
+    return results
+
+
+async def basis_for(provider, call, finding: dict, line: str, day: str) -> dict:
+    """A bundle of one."""
+    return (await basis_for_bundle(provider, call, [finding], [line], day))[0]
 
 
 async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | None = None,
@@ -351,15 +385,22 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
                     card["readCheck"] = read
                 seen[key] = card
                 kept.append(card)
+        bundles = {}
+        for finding in kept:
+            bundles.setdefault(bundle_key(finding, texts_by_id), []).append(finding)
         limit = asyncio.Semaphore(4)
 
-        async def one(finding):
+        async def one(bundle):
             async with limit:
                 try:
-                    return await basis_for(provider, session_call, finding, line_of(finding, texts_by_id), day)
+                    return await basis_for_bundle(provider, session_call, bundle,
+                                                  [line_of(f, texts_by_id) for f in bundle], day)
                 except Exception:
-                    return None
-        return kept, dismissed, await asyncio.gather(*(one(f) for f in kept)), warnings
+                    return [None] * len(bundle)
+        by_id = {}
+        for bundle, results in zip(bundles.values(), await asyncio.gather(*(one(b) for b in bundles.values()))):
+            by_id.update({f["id"]: r for f, r in zip(bundle, results)})
+        return kept, dismissed, [by_id[f["id"]] for f in kept], warnings
 
     try:
         if call is None:
