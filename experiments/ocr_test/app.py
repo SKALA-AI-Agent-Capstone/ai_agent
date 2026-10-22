@@ -1,0 +1,225 @@
+"""OCR and vision reading comparison (experiment only, never merged into main).
+
+The same uploaded image is cut into content sections (capstone_shared.documents.tile_image), and every
+section is read two ways:
+
+  Method 1  Tesseract reads the lines, a text model cleans spacing and broken OCR without seeing the
+            image, then the vision model reads the section itself and merges the cleaned OCR lines in,
+            dropping duplicates and marking what only OCR found.
+  Method 2  Tesseract only says where text is (line boxes). The vision model gets the section with the
+            numbered boxes drawn on it, reads the text in each box, adds text outside the boxes, and
+            describes the non-text visuals.
+
+Both return the same shape: text blocks of quoted segments, and factual [이미지] descriptions with no
+judgment. Run with experiments/ocr_test/run.sh and open http://127.0.0.1:8090.
+"""
+import asyncio
+import base64
+from io import BytesIO
+import os
+from pathlib import Path
+import time
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from openai import AsyncOpenAI
+from PIL import Image, ImageDraw, ImageOps
+from typing import Literal
+
+from pydantic import BaseModel
+
+from capstone_shared.documents import local_ocr, tile_image
+
+HERE = Path(__file__).parent
+VISION_MODEL = os.getenv("VISION_MODEL", "gpt-5.4-mini")
+TEXT_MODEL = os.getenv("TEXT_MODEL", "gpt-5.4-mini")
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""), timeout=90, max_retries=1)
+limit = asyncio.Semaphore(int(os.getenv("OCR_TEST_CONCURRENCY", "4")))
+
+FACTUAL_IMAGES = (
+    "images에는 글자를 뺀 시각 요소만 사실대로 묘사한다. 무엇이 어디에(좌측, 우측, 상단, 하단, 중앙) 있는지만 쓴다. "
+    "예: '중앙에 흰 크림 용기와 열린 뚜껑이 있음', '좌측에 주름진 이마 사진, 우측에 주름이 펴진 이마 사진이 있음'. "
+    "효과, 품질, 광고 의도, 과장 여부 같은 판단이나 평가는 절대 쓰지 않는다. 글자만 있는 배경이나 장식선은 쓰지 않는다. "
+    "시각 요소가 없으면 빈 목록이다."
+)
+SEGMENTS = (
+    "글자는 이미지에 실제로 보이는 그대로 옮긴다. 띄어쓰기만 바르게 고치고, 단어나 숫자를 바꾸거나 추측해서 채우지 않는다. "
+    "읽을 수 없는 부분은 [판독 불가]로 둔다. 시각적으로 구분되는 글자 단위(한 줄, 한 문구, 한 항목)마다 segments의 한 칸으로 나누고, "
+    "제목과 설명처럼 한 덩어리로 읽히는 글자들은 같은 block에 묶는다. 위에서 아래, 왼쪽에서 오른쪽 순서로 쓴다."
+)
+
+
+# ---------- output shapes ----------
+
+class Block(BaseModel):
+    segments: list[str]
+    source: Literal["image", "ocr"]  # "ocr": found only because of the OCR reference lines
+
+
+class Reading(BaseModel):
+    blocks: list[Block]
+    images: list[str]
+
+
+class CleanLine(BaseModel):
+    raw: str
+    fixed: str
+    dropped: bool
+
+
+class Cleaned(BaseModel):
+    lines: list[CleanLine]
+
+
+class BoxBlock(BaseModel):
+    segments: list[str]
+    box_ids: list[int]
+
+
+class BoxReading(BaseModel):
+    blocks: list[BoxBlock]
+    outside_boxes: list[str]
+    images: list[str]
+
+
+# ---------- helpers ----------
+
+def data_url(image: Image.Image, longest=2048) -> str:
+    image = image.copy().convert("RGB")
+    image.thumbnail((longest, longest))
+    out = BytesIO()
+    image.save(out, format="JPEG", quality=90)
+    return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()
+
+
+async def parse(model, system, schema, text, images=()):
+    content = [{"type": "input_text", "text": text}]
+    content += [{"type": "input_image", "image_url": url, "detail": "high"} for url in images]
+    async with limit:
+        response = await client.responses.parse(
+            model=model, input=[{"role": "system", "content": system}, {"role": "user", "content": content}],
+            text_format=schema, store=False, max_output_tokens=6000)
+    if response.output_parsed is None:
+        raise RuntimeError("MODEL_REFUSED_OR_INCOMPLETE")
+    usage = response.usage
+    return response.output_parsed, {"input": usage.input_tokens, "output": usage.output_tokens} if usage else {}
+
+
+def ocr_lines(tile):
+    """Tesseract lines of one section with boxes in section pixels."""
+    width, height = tile.source_size
+    x0, y0 = tile.box[0], tile.box[1]
+    lines = []
+    for line in local_ocr(tile):
+        bx0, by0, bx1, by1 = line["location"]["bbox"]
+        lines.append({"text": line["text"], "conf": round(line.get("ocrConfidence") or 0, 1),
+                      "box": [round(bx0 * width - x0), round(by0 * height - y0), round(bx1 * width - x0), round(by1 * height - y0)]})
+    return lines
+
+
+def annotate(image: Image.Image, lines) -> Image.Image:
+    """Numbered thin boxes, labels outside the box so small text stays visible."""
+    marked = image.copy().convert("RGB")
+    draw = ImageDraw.Draw(marked)
+    for i, line in enumerate(lines, 1):
+        x0, y0, x1, y1 = line["box"]
+        draw.rectangle((x0 - 2, y0 - 2, x1 + 2, y1 + 2), outline=(255, 0, 80), width=2)
+        label = str(i)
+        lx, ly = max(0, x0 - 4 - 8 * len(label)), max(0, y0 - 2)
+        draw.rectangle((lx, ly, lx + 8 * len(label) + 2, ly + 13), fill=(255, 0, 80))
+        draw.text((lx + 1, ly), label, fill=(255, 255, 255))
+    return marked
+
+
+# ---------- the two methods ----------
+
+async def method_one(tile, lines):
+    started, calls, tokens = time.monotonic(), 0, []
+    cleaned = []
+    if lines:
+        result, usage = await parse(
+            TEXT_MODEL,
+            "로컬 OCR이 광고 이미지에서 읽은 줄들이다. 이미지는 볼 수 없다. 각 줄의 띄어쓰기를 고치고, OCR이 깨뜨린 글자는 "
+            "문맥상 분명할 때만 바로잡는다. 의미를 알 수 없는 잡음 줄은 dropped=true로 둔다. 줄 수와 순서는 입력과 같게 유지한다.",
+            Cleaned, "\n".join(line["text"] for line in lines))
+        calls += 1
+        tokens.append(usage)
+        cleaned = [c.model_dump() for c in result.lines]
+    reference = "\n".join(f"- {c['fixed']}" for c in cleaned if not c["dropped"]) or "(없음)"
+    reading, usage = await parse(
+        VISION_MODEL,
+        "화장품 광고 이미지의 한 구간을 사실대로 옮긴다. " + SEGMENTS + " "
+        "아래 OCR 참고 줄은 틀릴 수 있다. 이미지에서 직접 확인되는 글자만 쓰고, 이미지에서 확인되지 않는 OCR 줄은 버린다. "
+        "직접 읽다가 놓쳤지만 OCR 참고 줄 덕분에 이미지에서 확인한 글자는 source='ocr', 나머지는 source='image'로 쓴다. "
+        "같은 글자를 두 번 쓰지 않는다. " + FACTUAL_IMAGES,
+        Reading, f"OCR 참고 줄:\n{reference}", [data_url(tile.image)])
+    calls += 1
+    tokens.append(usage)
+    return {"ocr": lines, "cleaned": cleaned, "blocks": [b.model_dump() for b in reading.blocks], "images": reading.images,
+            "seconds": round(time.monotonic() - started, 1), "calls": calls, "tokens": tokens}
+
+
+async def method_two(tile, lines):
+    started = time.monotonic()
+    marked = annotate(tile.image, lines)
+    boxes = "\n".join(f"{i}: x {l['box'][0]}~{l['box'][2]}, y {l['box'][1]}~{l['box'][3]}" for i, l in enumerate(lines, 1)) or "(상자 없음)"
+    reading, usage = await parse(
+        VISION_MODEL,
+        "화장품 광고 이미지의 한 구간이다. 첫 이미지는 원본, 두 번째는 글자가 있을 만한 위치에 번호 상자를 그린 것이다. "
+        "상자마다 원본에서 그 위치의 글자를 읽어라. 상자 위치가 어긋나 있으면 가까운 글자를 읽는다. " + SEGMENTS + " "
+        "각 block에는 그 글자가 들어 있던 상자 번호(box_ids)를 쓴다. 상자 밖에 있는데 상자가 놓친 글자는 outside_boxes에 쓴다. "
+        "글자가 없는 상자는 무시한다. 상자가 하나도 없으면 box_ids는 빈 목록으로 두고 모든 글자를 outside_boxes에 쓴다. " + FACTUAL_IMAGES,
+        BoxReading, f"상자 좌표(구간 픽셀 기준, 너비 {tile.image.width}, 높이 {tile.image.height}):\n{boxes}",
+        [data_url(tile.image), data_url(marked)])
+    # The model sometimes cites box numbers that were never drawn; keep only real ones and move the rest outside.
+    blocks, outside = [], list(reading.outside_boxes)
+    for block in reading.blocks:
+        ids = [i for i in block.box_ids if 1 <= i <= len(lines)]
+        if ids:
+            blocks.append({"segments": block.segments, "box_ids": ids})
+        else:
+            outside += block.segments
+    return {"boxes": lines, "annotated": data_url(marked, 1200), "blocks": blocks,
+            "outside": outside, "images": reading.images,
+            "seconds": round(time.monotonic() - started, 1), "calls": 1, "tokens": [usage]}
+
+
+async def safely(coro):
+    try:
+        return await coro
+    except Exception as error:  # Show the failure in the page instead of failing the whole comparison.
+        return {"error": f"{type(error).__name__}: {str(error)[:300]}"}
+
+
+async def section(index, tile):
+    lines = await asyncio.to_thread(ocr_lines, tile)
+    first, second = await asyncio.gather(safely(method_one(tile, lines)), safely(method_two(tile, lines)))
+    return {"index": index, "box": list(tile.box), "image": data_url(tile.image, 1200), "method1": first, "method2": second}
+
+
+app = FastAPI(title="OCR test")
+
+
+@app.get("/")
+async def page():
+    return FileResponse(HERE / "index.html")
+
+
+@app.post("/api/analyze")
+async def analyze(request: Request):
+    raw = await request.body()
+    if not raw:
+        return JSONResponse({"error": "이미지를 올려 주세요."}, status_code=400)
+    if not os.getenv("OPENAI_API_KEY"):
+        return JSONResponse({"error": "OPENAI_API_KEY가 없습니다."}, status_code=503)
+    image = ImageOps.exif_transpose(Image.open(BytesIO(raw))).convert("RGB")
+    started = time.monotonic()
+    tiles = await asyncio.to_thread(tile_image, image, "upload", request.headers.get("x-file-name", "upload"))
+    sections = await asyncio.gather(*(section(i, t) for i, t in enumerate(tiles)))
+    return {"size": list(image.size), "sections": sections, "seconds": round(time.monotonic() - started, 1),
+            "models": {"vision": VISION_MODEL, "text": TEXT_MODEL}}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("OCR_TEST_PORT", "8090")))
