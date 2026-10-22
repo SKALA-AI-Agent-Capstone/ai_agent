@@ -9,6 +9,7 @@ A block is one meaning unit: {id, text, segments, role, location}. role is claim
 result (numbers, survey results). Condition blocks are context for the evidence comparison, not claims to review.
 """
 import asyncio
+import os
 import re
 from difflib import SequenceMatcher
 from typing import Literal
@@ -17,6 +18,10 @@ from pydantic import BaseModel
 
 from capstone_shared.documents import Tile, local_ocr
 from .instructions import instruction
+
+
+# Tesseract is CPU bound. Every section reads at two sizes, so unbounded threads time out under load.
+OCR_SLOTS = asyncio.Semaphore(int(os.getenv("OCR_CONCURRENCY", "3")))
 
 
 class Group(BaseModel):
@@ -154,15 +159,21 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
     """One section -> (blocks, warnings). Raises only when both Tesseract and the model are unavailable."""
     warnings = []
     try:
-        lines = await asyncio.to_thread(local_ocr, tile)
+        async with OCR_SLOTS:
+            lines = await asyncio.to_thread(local_ocr, tile)
         lines = [line for line in lines if line["location"].get("bbox")]
-        # Large headline letters are often missed at full size; a half-size read finds them.
-        small = await asyncio.to_thread(local_ocr, tile, 0.5)
+    except Exception:
+        lines, warnings = [], [f"{tile.id}:OCR_NOT_AVAILABLE"]
+    try:
+        # Large headline letters are often missed at full size; a half-size read finds them. Its failure only
+        # loses those extra lines.
+        async with OCR_SLOTS:
+            small = await asyncio.to_thread(local_ocr, tile, 0.5)
         lines += [line for line in small if line["location"].get("bbox") and len(norm(line["text"])) >= 2
                   and not any(overlaps(line["location"]["bbox"], kept["location"]["bbox"]) for kept in lines)]
         lines.sort(key=lambda line: (line["location"]["bbox"][1], line["location"]["bbox"][0]))
     except Exception:
-        lines, warnings = [], [f"{tile.id}:OCR_NOT_AVAILABLE"]
+        warnings.append(f"{tile.id}:OCR_SMALL_PASS_FAILED")
     if not provider.client:
         return tesseract_blocks(tile, lines), warnings
     boxes = "\n".join(
