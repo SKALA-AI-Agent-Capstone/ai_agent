@@ -5,7 +5,7 @@
   uv run --all-packages --frozen python scripts/evaluate_harness.py --compare reports/eval/a.json reports/eval/b.json
 
 Each run calls the text model once per case (synthetic copy only, no images). Reports go to reports/eval,
-which Git ignores; paste the --compare table into the sibling backend/docs/13-harness-evaluation.md when a prompt,
+which Git ignores; paste the --compare table into the sibling backend/docs/13-harness-evaluation/2026-10-21.md when a prompt,
 limit or model changes.
 """
 import argparse

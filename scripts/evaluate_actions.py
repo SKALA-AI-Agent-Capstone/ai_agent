@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Run the harness evaluation set 2026-10-22 and record it in the sibling backend/docs/13-harness-evaluation.md.
+"""Run the harness evaluation set 2026-10-22 and write its validation report.
 
   uv run --all-packages --frozen python scripts/evaluate_actions.py --label baseline --repeat 3
-  uv run --all-packages --frozen python scripts/evaluate_actions.py --case P01 --case P02 --no-docs
+  uv run --all-packages --frozen python scripts/evaluate_actions.py --label after-fix --repeat 3 --before reports/eval/<baseline>.json
+  uv run --all-packages --frozen python scripts/evaluate_actions.py --case P01 --case P02
 
 Needs the running rag-mcp and business-mcp and OPENAI_API_KEY. Evidence PDFs are read from evals/2026-10-22/fixtures
 through the real extraction function; only the file transfer from the Backend is replaced. A case with
-fault evidence_parse_error gets an injected parser failure. The raw report goes to reports/eval (Git ignores it)
-and a summary section is appended under the document's 2026-10-22 results unless --no-docs is given.
+fault evidence_parse_error gets an injected parser failure. Everything goes to reports/eval (Git ignores it):
+the raw report (.json), the validation report section (.md) and its rows as a CSV. Paste the .md into the
+검증 결과 section of backend/docs/13-harness-evaluation/2026-10-22.md; --before fills 개선 전 and 개선 후.
 """
 import argparse
 import asyncio
@@ -25,9 +27,6 @@ import httpx
 from local_config import ROOT, load_env
 
 CASES = ROOT / "evals" / "2026-10-22" / "harness_cases.json"
-# Docs live once in the backend repository (README: 공통 문서는 backend에서 관리).
-DOC = ROOT.parent / "backend" / "docs" / "13-harness-evaluation.md"
-RESULTS_HEADING = "### 2026-10-22 결과 기록"
 PROMPT = ROOT / "services" / "agent" / "src" / "capstone_agent" / "prompts" / "text_review.md"
 RULES = ROOT / "services" / "rag-mcp" / "src" / "capstone_rag_mcp" / "claim_rules.json"
 ACTIONS_JS = ROOT.parent / "frontend" / "src" / "shared" / "constants" / "reviewActions.js"
@@ -149,13 +148,10 @@ def evidence_warnings(evidence: dict) -> dict:
     return out
 
 
-def append_to_doc(doc: Path, section: str) -> None:
-    """Append under the 2026-10-22 results, which close the document. Headings drop two levels to sit there."""
-    text = doc.read_text(encoding="utf-8").rstrip("\n")
-    if f"\n{RESULTS_HEADING}\n" not in f"\n{text}\n":
-        raise SystemExit(f"{doc} has no '{RESULTS_HEADING}' section to append to.")
-    section = section.replace("\n### ", "\n##### ").replace("## ", "#### ", 1)
-    doc.write_text(text + "\n\n" + section, encoding="utf-8")
+def prompt_date() -> str | None:
+    """Date of the last commit that changed the text_review prompt, shown as the prompt version."""
+    done = subprocess.run(["git", "log", "-1", "--format=%cs", "--", str(PROMPT)], cwd=ROOT, capture_output=True, text=True)
+    return done.stdout.strip() or None
 
 
 def main():
@@ -163,12 +159,11 @@ def main():
     parser.add_argument("--label", default="run")
     parser.add_argument("--repeat", type=int, default=1, help="Runs to compare; model output varies between runs")
     parser.add_argument("--case", action="append", help="Only this case id (repeatable)")
-    parser.add_argument("--no-docs", action="store_true", help="Do not append the result to the evaluation document")
-    parser.add_argument("--doc", type=Path, default=DOC, help="Evaluation document (default: sibling backend docs)")
+    parser.add_argument("--before", type=Path, help="Earlier report (.json) to compare against in the result line")
     parser.add_argument("--env-file")
     args = parser.parse_args()
 
-    from action_evaluation import render, summarize, validate
+    from action_evaluation import render, summarize, to_csv, validate
     data = json.loads(CASES.read_text(encoding="utf-8"))
     problems = validate(data)
     if problems:
@@ -177,8 +172,7 @@ def main():
     missing = [f for c in cases for f in c.get("evidenceFiles") or [] if not (CASES.parent / f).is_file()]
     if missing:
         raise SystemExit("Evidence files are missing (see evals/2026-10-22/fixtures/README.md): " + ", ".join(sorted(set(missing))))
-    if not args.no_docs and not args.doc.is_file():
-        raise SystemExit(f"Evaluation document not found: {args.doc}. Clone backend next to ai_agent or pass --doc.")
+    before = json.loads(args.before.read_text(encoding="utf-8")) if args.before else None
     load_env(args.env_file)
     warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
@@ -196,6 +190,7 @@ def main():
                    "cases": len(cases), "casesVersion": data["version"],
                    "textModel": os.getenv("TEXT_MODEL", "gpt-5.4-mini"),
                    "promptHash": hashlib.sha256(PROMPT.read_bytes()).hexdigest()[:8],
+                   "promptDate": prompt_date(),
                    "rulesVersion": json.loads(RULES.read_text(encoding="utf-8"))["version"],
                    "commit": git_commit(), "reportPath": str(path.relative_to(ROOT)),
                    "evidenceWarnings": evidence_warnings(evidence)},
@@ -203,12 +198,11 @@ def main():
         "runs": runs,
     }
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    section = render(report, runs[-1])
+    section = render(report, cases, before)
+    path.with_suffix(".md").write_text(section, encoding="utf-8")
+    path.with_suffix(".csv").write_text(to_csv(report, cases), encoding="utf-8-sig")
     print(section)
-    if not args.no_docs:
-        append_to_doc(args.doc, section)
-        print(f"Appended to {args.doc}")
-    print(f"Saved {path.relative_to(ROOT)}")
+    print(f"Saved {path.relative_to(ROOT)} with .md and .csv")
 
 
 if __name__ == "__main__":
