@@ -5,7 +5,8 @@
   uv run --all-packages --frozen python scripts/evaluate_harness.py --compare reports/eval/a.json reports/eval/b.json
 
 Each run calls the text model once per case (synthetic copy only, no images). Reports go to reports/eval,
-which Git ignores; paste the --compare table into docs/13-harness-evaluation.md when a prompt, limit or model changes.
+which Git ignores; paste the --compare table into the sibling backend/docs/13-harness-evaluation.md when a prompt,
+limit or model changes.
 """
 import argparse
 import asyncio
@@ -20,7 +21,7 @@ import warnings
 
 from local_config import ROOT, load_env
 
-CASES = ROOT / "evals" / "harness_cases.json"
+CASES = ROOT / "evals" / "2026-10-21" / "harness_cases.json"
 PROMPT = ROOT / "services" / "agent" / "src" / "capstone_agent" / "prompts" / "text_review.md"
 RULES = ROOT / "services" / "rag-mcp" / "src" / "capstone_rag_mcp" / "claim_rules.json"
 REPORTS = ROOT / "reports" / "eval"
@@ -33,7 +34,7 @@ def git_commit() -> str:
 
 
 async def run_once(data: dict, cases: list[dict], rule_sweep: bool = True) -> dict:
-    from capstone_agent.evaluation import score_case, summarize, texts_of
+    from evaluation import score_case, summarize, texts_of
     from capstone_agent.regulations import legal_basis
     from capstone_agent.review_engine import Provider, review_text
     from capstone_agent.tools import McpTools
@@ -67,7 +68,7 @@ def main():
     parser.add_argument("--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"))
     args = parser.parse_args()
 
-    from capstone_agent.evaluation import average, compare_table, render, validate
+    from evaluation import average, compare_table, render, validate
     if args.compare:
         before, after = (json.loads(p.read_text(encoding="utf-8")) for p in args.compare)
         print(compare_table(before, after))
