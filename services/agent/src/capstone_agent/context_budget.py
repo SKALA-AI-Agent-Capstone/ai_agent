@@ -18,6 +18,7 @@ MARKER = "\n[중간 내용은 입력 예산을 위해 생략됨]\n"
 PARSE_INPUT_BUDGETS = {
     "TextAssessment": 12000,
     "ClaimJudgments": 12000,
+    "Reread": 8000,
     "BasisCheck": 8000,
     "EvidenceSummary": 6000,
     "ClaimMatches": 8000,
@@ -30,6 +31,7 @@ PARSE_INPUT_BUDGETS = {
 PARSE_OUTPUT_BUDGETS = {
     "TextAssessment": 4500,
     "ClaimJudgments": 6000,
+    "Reread": 600,
     "BasisCheck": 2500,
     "EvidenceSummary": 1200,
     "ClaimMatches": 3000,

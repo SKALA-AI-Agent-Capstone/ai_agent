@@ -7,3 +7,5 @@ def development_environment(monkeypatch):
     monkeypatch.setenv("BACKEND_BASE_URL", "http://127.0.0.1:8080")
     monkeypatch.setenv("AGENT_DATABASE_URL", "postgresql://invalid@127.0.0.1:1/invalid")
     monkeypatch.setenv("RAG_DATABASE_URL", "postgresql://invalid@127.0.0.1:1/invalid")
+    # Unit tests fake Tesseract lines; tests of the PaddleOCR path turn it on themselves.
+    monkeypatch.setenv("OCR_ENGINE", "tesseract")

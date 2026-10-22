@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from capstone_shared.documents import Tile, local_ocr
 from .instructions import instruction
+from . import paddle_ocr
 
 
 # Tesseract is CPU bound. Every section reads at two sizes, so unbounded threads time out under load.
@@ -199,22 +200,93 @@ async def snap_to_ocr(tile: Tile, text: str, model_box: list[float]) -> list[dic
     return found
 
 
-def block(tile: Tile, key: str, group: Group, segments: list[str], text: str, hits: list[dict]) -> dict:
+def block(tile: Tile, key: str, group: Group, segments: list[str], text: str, hits: list[dict], engine="TESSERACT",
+          check=None) -> dict:
     box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
-    return {"id": f"{tile.id}:copy:{key}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
-            "words": [w for line in hits for w in line.get("words", [])],
-            "location": tile.location(precise_box=box, method=method or "VISION_COPY_REGION")}
+    out = {"id": f"{tile.id}:copy:{key}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
+           "words": [w for line in hits for w in line.get("words", [])],
+           "location": tile.location(precise_box=box, method=(engine if method == "TESSERACT" else method) or "VISION_COPY_REGION")}
+    if check:
+        out["readCheck"] = check
+    return out
 
 
-async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
-    """One section -> (blocks, warnings). Raises only when both Tesseract and the model are unavailable."""
-    warnings = []
+class Reread(BaseModel):
+    lines: list[str]
+
+
+def numbers(text: str) -> list[str]:
+    """Claim figures only: decimals and percents. A bare list index ('3 팔자 주름') is not a claim figure."""
+    return re.findall(r"\d+\.\d+|\d+(?=\s*%)", (text or "").replace(",", ""))
+
+
+def figure_conflict(vision: str, ocr: str) -> bool:
+    found, read = numbers(ocr), numbers(vision)
+    return any(found.count(n) < read.count(n) for n in set(read))
+
+
+def disagrees(vision: str, ocr: str) -> bool:
+    """The OCR lines under a group do not support its vision read: a figure the OCR does not show, or letters that
+    differ beyond what extra OCR text (list numbers, a neighbouring line) explains."""
+    a, b = norm(vision), norm(ocr)
+    if not a or not b:
+        return False
+    if figure_conflict(vision, ocr):
+        return True
+    if a in b:
+        return False
+    return SequenceMatcher(None, a, b).ratio() < 0.9
+
+
+async def reread(provider, tile: Tile, hits: list[dict]) -> str:
+    """Read just the OCR box of one group, enlarged, letter by letter (no grouping, no product rules)."""
+    x0, y0, x1, y1 = (lambda boxes: (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes),
+                                     max(b[3] for b in boxes)))([section_box(tile, h) for h in hits])
+    crop = tile.image.crop((max(0, x0 - 8), max(0, y0 - 8), min(tile.image.width, x1 + 8), min(tile.image.height, y1 + 8)))
+    crop = crop.resize((crop.width * 2, crop.height * 2))
+    out = await provider.parse(instruction("literal_reread"), Reread, image=data_url(crop),
+                               text="잘린 영역의 글자를 한 줄씩 그대로 옮긴다.")
+    return " ".join(line.strip() for line in out.lines if line.strip())
+
+
+async def check_reading(provider, tile: Tile, text: str, hits: list[dict]) -> tuple[str, dict | None]:
+    """OCR and vision read the same letters independently. Agreement passes; a disagreement gets one enlarged
+    literal reread. When the reread sides with the OCR letters it replaces the vision text, when it repeats the
+    vision text the OCR was the noisy one (confirmed); otherwise both readings are kept for the reviewer
+    (needs_review). VLMs tend to rewrite odd words into common ones."""
+    ocr = " ".join(h["text"] for h in hits)
+    if not hits or not disagrees(text, ocr):
+        return text, ({"status": "agreed"} if hits else None)
+    try:
+        again = await reread(provider, tile, hits)
+    except Exception:
+        return text, {"status": "needs_review", "vision": text, "ocr": ocr}
+    if again and not disagrees(again, ocr) and disagrees(text, again):
+        return again, {"status": "corrected", "vision": text, "ocr": ocr}
+    if again and not disagrees(text, again) and not figure_conflict(text, ocr):
+        # Two vision reads agree and the OCR is the odd one out (OCR noise, such as '열어질' for '옅어질').
+        # A figure is never settled this way: two reads against the OCR on a number go to the reviewer.
+        return text, {"status": "confirmed", "ocr": ocr}
+    return text, {"status": "needs_review", "vision": text, "ocr": ocr, "reread": again}
+
+
+async def ocr_lines(tile: Tile) -> tuple[list[dict], list[str], str]:
+    """PaddleOCR when available; Tesseract (full and half size) otherwise or when PaddleOCR fails."""
+    if paddle_ocr.enabled():
+        try:
+            async with OCR_SLOTS:
+                lines = await asyncio.to_thread(paddle_ocr.paddle_lines, tile)
+            return [line for line in lines if line["location"].get("bbox")], [], "PADDLE_OCR"
+        except Exception:
+            warnings = [f"{tile.id}:PADDLE_OCR_FAILED"]
+    else:
+        warnings = []
     try:
         async with OCR_SLOTS:
             lines = await asyncio.to_thread(local_ocr, tile)
         lines = [line for line in lines if line["location"].get("bbox")]
     except Exception:
-        lines, warnings = [], [f"{tile.id}:OCR_NOT_AVAILABLE"]
+        return [], warnings + [f"{tile.id}:OCR_NOT_AVAILABLE"], "TESSERACT"
     try:
         # Large headline letters are often missed at full size; a half-size read finds them. Its failure only
         # loses those extra lines.
@@ -225,6 +297,12 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
         lines.sort(key=lambda line: (line["location"]["bbox"][1], line["location"]["bbox"][0]))
     except Exception:
         warnings.append(f"{tile.id}:OCR_SMALL_PASS_FAILED")
+    return lines, warnings, "TESSERACT"
+
+
+async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
+    """One section -> (blocks, warnings). Raises only when both Tesseract and the model are unavailable."""
+    lines, warnings, engine = await ocr_lines(tile)
     if not provider.client:
         return tesseract_blocks(tile, lines), warnings
     try:
@@ -233,11 +311,17 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
         return tesseract_blocks(tile, lines), warnings + [f"{tile.id}:OCR_PROVIDER_FAILED"]
     groups = copy_groups(reading)
     assigned = assign_lines([g[3] for g in groups], [g[1].box_numbers for g in groups], lines)
+    blocks = []
     for (n, group, segments, text), hits in zip(groups, assigned):
         model = vision_box(tile, group.box)
-        if not hits and model:
+        if not hits and model and engine == "TESSERACT":
             hits += await snap_to_ocr(tile, text, model)
-    blocks = [block(tile, f"{n}", group, segments, text, hits) for (n, group, segments, text), hits in zip(groups, assigned)]
+        check = None
+        if engine == "PADDLE_OCR":
+            corrected, check = await check_reading(provider, tile, text, hits)
+            if corrected != text:
+                text, segments = corrected, [corrected]
+        blocks.append(block(tile, f"{n}", group, segments, text, hits, engine, check))
     # Recall pass (the OCR-first idea): OCR lines no group took and that are not product text are shown to the
     # model once more, alone, so copy the first read skipped is not lost. Only groups anchored on those lines count.
     taken = {id(line) for hits in assigned for line in hits}
@@ -250,7 +334,7 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
             extra = copy_groups(again)
             for (n, group, segments, text), hits in zip(extra, assign_lines([g[3] for g in extra], [g[1].box_numbers for g in extra], missed)):
                 if hits:
-                    blocks.append(block(tile, f"r{n}", group, segments, text, hits))
+                    blocks.append(block(tile, f"r{n}", group, segments, text, hits, engine))
         except Exception:
             warnings.append(f"{tile.id}:RECALL_PASS_FAILED")
     return blocks, warnings

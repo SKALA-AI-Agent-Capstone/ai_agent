@@ -138,3 +138,17 @@ async def test_a_claim_repeated_in_another_section_is_one_card():
                              model, call=rag)
     [card] = out["findings"]
     assert card["id"] == "f1" and [a["textId"] for a in card["alsoAt"]] == ["t9"]
+
+
+async def test_judgment_sees_the_section_and_the_card_keeps_its_footnote():
+    loc = {"kind": "image", "fileId": "a", "page": 1, "bbox": None, "tileId": "a:p1:t2"}
+    texts = [{"id": "t1", "text": "탄성 복원 63.91% 개선", "role": "result", "location": loc},
+             {"id": "t2", "text": "임상으로 검증된 7종 피부 노화 징후 개선 효과", "role": "claim", "location": loc},
+             {"id": "t3", "text": "*인체적용시험 20명, 25.02.24~25.03.14", "role": "condition", "location": loc}]
+    rag = Rag([[SUBSTANTIATION]])
+    model = Model([[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}]])
+    out = await judged_basis([finding("f1", "탄성 복원 63.91% 개선", "t1")], model,
+                             texts=[t for t in texts if t["role"] != "condition"], section_texts=texts, call=rag)
+    listing = next(t for name, t in model.seen if name == "ClaimJudgments")
+    assert "같은 구간: (주장) 임상으로 검증된" in listing and "(조건 각주) *인체적용시험 20명" in listing
+    assert out["findings"][0]["conditions"] == ["*인체적용시험 20명, 25.02.24~25.03.14"]

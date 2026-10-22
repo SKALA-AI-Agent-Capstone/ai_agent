@@ -669,7 +669,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         claim_texts = [t for t in state["texts"] if t.get("role") != "condition"]
         # With a model: judge, pick basis tools per claim, verify apart (judged_basis.py). Without one: rules and search.
         if provider.client:
-            lookup = await judged_basis(state["findings"], provider, texts=claim_texts)
+            lookup = await judged_basis(state["findings"], provider, texts=claim_texts, section_texts=state["texts"])
         else:
             lookup = await legal_basis(state["findings"], texts=claim_texts)
         await emit(request, "tool_finished", tool="legal_basis", ok=lookup["status"] in ("connected", "skipped"))

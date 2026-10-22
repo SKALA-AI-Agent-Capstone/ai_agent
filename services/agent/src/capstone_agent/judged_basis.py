@@ -87,9 +87,24 @@ def line_of(finding: dict, texts_by_id: dict) -> str:
     return (texts_by_id.get(finding.get("textId")) or {}).get("text") or finding["phrase"]
 
 
-async def judge(provider, findings: list[dict], texts_by_id: dict) -> dict[str, Judgment]:
-    listing = "\n".join(f"[{f['id']}] 문구: {f['phrase']}\n줄 전체: {line_of(f, texts_by_id)}\n1차 메모: {f.get('reason', '')}"
-                        for f in findings)
+def section_of(finding: dict, texts_by_id: dict, sections: dict) -> list[dict]:
+    """The other copy blocks of the claim's section: its headline, numbers and test-condition footnotes."""
+    own = texts_by_id.get(finding.get("textId")) or {}
+    tile = (own.get("location") or finding.get("location") or {}).get("tileId")
+    return [t for t in sections.get(tile, []) if t["id"] != own.get("id")]
+
+
+ROLE_NAMES = {"claim": "주장", "result": "수치", "condition": "조건 각주"}
+
+
+async def judge(provider, findings: list[dict], texts_by_id: dict, sections: dict) -> dict[str, Judgment]:
+    """One call for all candidates. Each comes with its section's other copy as context, so a number is judged
+    with the headline it supports and the footnote that states its test, and only the problem words go on."""
+    def context(f):
+        near = section_of(f, texts_by_id, sections)[:8]
+        return "; ".join(f"({ROLE_NAMES.get(t.get('role'), '문구')}) {t['text'][:60]}" for t in near) or "(없음)"
+    listing = "\n".join(f"[{f['id']}] 문구: {f['phrase']}\n줄 전체: {line_of(f, texts_by_id)}\n같은 구간: {context(f)}"
+                        f"\n1차 메모: {f.get('reason', '')}" for f in findings)
     output = await provider.parse(instruction("claim_judgment"), ClaimJudgments, text=listing)
     return {j.id: j for j in output.judgments}
 
@@ -290,10 +305,16 @@ async def basis_for(provider, call, finding: dict, line: str, day: str) -> dict:
 
 
 async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | None = None,
-                       review_date: date | None = None, call=None) -> dict:
-    """Same shape as regulations.legal_basis, plus "dismissed": candidates judged not a regulatory concern."""
+                       section_texts: list[dict] | None = None, review_date: date | None = None, call=None) -> dict:
+    """Same shape as regulations.legal_basis, plus "dismissed": candidates judged not a regulatory concern.
+
+    texts are the claim copy the rule sweep reads; section_texts are all copy blocks, footnotes included,
+    used as each claim's context."""
     day = (review_date or date.today()).isoformat()
-    texts_by_id = {t["id"]: t for t in texts or []}
+    texts_by_id = {t["id"]: t for t in (section_texts or []) + (texts or [])}
+    sections = {}
+    for t in section_texts or texts or []:
+        sections.setdefault((t.get("location") or {}).get("tileId"), []).append(t)
 
     async def run(session_call):
         swept = []
@@ -307,7 +328,7 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
             return [], [], [], []
         warnings = []
         try:
-            judgments = await judge(provider, candidates, texts_by_id)
+            judgments = await judge(provider, candidates, texts_by_id, sections)
         except Exception:
             judgments, warnings = {}, ["CLAIM_JUDGMENT_FAILED"]
         kept, dismissed, seen = [], [], {}
@@ -320,8 +341,16 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
                 # The same claim repeated in another section is one card; its other places are listed on it.
                 seen[key].setdefault("alsoAt", []).append({"textId": finding.get("textId"), "location": finding.get("location")})
             else:
-                seen[key] = apply_judgment(finding, judgment, texts_by_id.get(finding.get("textId")))
-                kept.append(seen[key])
+                card = apply_judgment(finding, judgment, texts_by_id.get(finding.get("textId")))
+                # The section's test-condition footnotes travel with the claim for the evidence comparison.
+                conditions = [t["text"] for t in section_of(finding, texts_by_id, sections) if t.get("role") == "condition"]
+                if conditions:
+                    card["conditions"] = conditions
+                read = (texts_by_id.get(finding.get("textId")) or {}).get("readCheck") or {}
+                if read.get("status") == "needs_review":
+                    card["readCheck"] = read
+                seen[key] = card
+                kept.append(card)
         limit = asyncio.Semaphore(4)
 
         async def one(finding):
