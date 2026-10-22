@@ -9,6 +9,10 @@ import re
 
 import psycopg
 
+# Until 2026-10-22 the 화장품법 statutes came from legalize-kr (GitHub); the Law API copy replaces them.
+# Stored legacy rows stay readable until a reload ends their effective range (ingest.retire_replaced).
+LEGACY_KEYS = {f"lawapi:화장품법/{kind}": f"legalize-kr:화장품법/{kind}" for kind in ("법률", "시행령", "시행규칙")}
+
 # document_key prefix -> official law name used in citations
 DOCUMENT_LAWS = {
     "legalize-kr:화장품법/법률": "화장품법",
@@ -98,7 +102,7 @@ def rebuild_links(conn: psycopg.Connection) -> int:
         cur.execute("TRUNCATE knowledge.article_links")
         cur.execute("""SELECT DISTINCT d.document_key, c.section, c.body FROM knowledge.chunks c
                        JOIN knowledge.document_versions d USING (document_version_id)
-                       WHERE d.collection_key = 'rules' AND c.section IS NOT NULL""")
+                       WHERE d.collection_key = 'rules' AND c.section IS NOT NULL AND c.parent_chunk_id IS NULL""")
         rows = cur.fetchall()
         edges = set()
         for document_key, section, body in rows:

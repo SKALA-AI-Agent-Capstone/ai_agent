@@ -29,7 +29,7 @@
       ],
       "provisions": [
         {
-          "document_key": "legalize-kr:화장품법/법률",
+          "document_key": "lawapi:화장품법/법률",
           "section": "제13조",
           "item_hint": "의약품으로 잘못 인식할 우려"
         },
@@ -68,7 +68,7 @@
       ],
       "provisions": [
         {
-          "document_key": "legalize-kr:화장품법/법률",
+          "document_key": "lawapi:화장품법/법률",
           "section": "제13조",
           "item_hint": "기능성화장품이 아닌 화장품을 기능성화장품으로 잘못 인식"
         },
@@ -115,7 +115,7 @@
           "section": "별표 5 제2호 사목"
         },
         {
-          "document_key": "legalize-kr:화장품법/법률",
+          "document_key": "lawapi:화장품법/법률",
           "section": "제13조",
           "item_hint": "심사결과와 다른 내용"
         }
@@ -145,11 +145,11 @@
       ],
       "provisions": [
         {
-          "document_key": "legalize-kr:화장품법/법률",
+          "document_key": "lawapi:화장품법/법률",
           "section": "제14조"
         },
         {
-          "document_key": "legalize-kr:화장품법/시행규칙",
+          "document_key": "lawapi:화장품법/시행규칙",
           "section": "제23조"
         },
         {
@@ -228,7 +228,7 @@
       ],
       "provisions": [
         {
-          "document_key": "legalize-kr:화장품법/법률",
+          "document_key": "lawapi:화장품법/법률",
           "section": "제13조",
           "item_hint": "사실과 다르게 소비자를 속이거나"
         },

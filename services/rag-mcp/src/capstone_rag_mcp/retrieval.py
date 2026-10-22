@@ -15,6 +15,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .embedding import Embedder
+from .parents import collapse
 
 MIN_COVERAGE = 0.12
 RRF_K = 60
@@ -37,9 +38,13 @@ WITH docs AS (
     ORDER BY document_key, effective_from DESC NULLS LAST, retrieved_at DESC
 )
 SELECT c.chunk_id::text, c.section, c.context, c.body, c.page_from,
+       c.parent_chunk_id::text AS parent_chunk_id, p.section AS parent_section, p.body AS parent_body,
        d.document_key, d.title, d.version_label, d.source_url, d.storage_key, d.source_type,
        d.effective_from, d.effective_until, d.corpus_version
 FROM knowledge.chunks c JOIN docs d USING (document_version_id)
+LEFT JOIN knowledge.chunks p ON p.chunk_id = c.parent_chunk_id
+-- Leaves only: a split article is searched through its 항/호 children, never as a whole.
+WHERE NOT EXISTS (SELECT 1 FROM knowledge.chunks k WHERE k.parent_chunk_id = c.chunk_id)
 """
 
 VECTOR_SQL = """
@@ -134,29 +139,31 @@ async def search(dsn: str, *, collection: str, query: str, top_k: int, review_da
         if not rows:
             return "keyword", [], []
         corpus = sorted({row["corpus_version"] for row in rows})
+        # Long articles are stored as 항/호 children: rank the children, answer with the whole article.
         keyword = keyword_rank(query, rows)
         if embedder is None:
-            return "keyword", keyword[:top_k], corpus
+            return "keyword", collapse(keyword, Ranked)[:top_k], corpus
         # The query embedding is an API call (OpenAI) or model inference; keep it off the event loop.
         query_vector = (await asyncio.to_thread(embedder.embed, [query]))[0]
         vector_rows = await (await conn.execute(VECTOR_SQL, {
             "vector": str(query_vector), "ids": [row["chunk_id"] for row in rows],
-            "model": embedder.model_name, "limit": max(top_k * 4, 20),
+            "model": embedder.model_name, "limit": max(top_k * 8, 40),  # several children per article
         })).fetchall()
         if not vector_rows:
-            return "keyword", keyword[:top_k], corpus
+            return "keyword", collapse(keyword, Ranked)[:top_k], corpus
         by_id = {row["chunk_id"]: row for row in rows}
         vector = [Ranked(by_id[v["chunk_id"]], c, vector=c)
                   for v in vector_rows for c in [round(max(0.0, min(1.0, v["cosine"])), 4)]]
         merged = {"confirm": confirm, "cascade": cascade}.get(order, fuse)(keyword, vector)
-        return "hybrid", merged[:top_k], corpus
+        return "hybrid", collapse(merged, Ranked)[:top_k], corpus
 
 
 INVENTORY_SQL = """
 SELECT d.document_version_id::text, d.document_key, d.title, d.collection_key, d.source_type, d.version_label,
        d.effective_from, d.effective_until, d.corpus_version, count(c.chunk_id) AS chunks,
        count(c.embedding) AS embedded
-FROM knowledge.document_versions d LEFT JOIN knowledge.chunks c USING (document_version_id)
+FROM knowledge.document_versions d
+LEFT JOIN knowledge.chunks c ON c.document_version_id = d.document_version_id AND c.parent_chunk_id IS NULL
 GROUP BY d.document_version_id
 ORDER BY d.document_key, d.effective_from NULLS LAST
 """
@@ -174,7 +181,7 @@ SELECT d.document_key, d.title, d.version_label, d.source_type, d.source_url,
        d.effective_from, d.effective_until, d.corpus_version,
        c.chunk_index, c.section, c.page_from, c.body
 FROM knowledge.document_versions d JOIN knowledge.chunks c USING (document_version_id)
-WHERE d.document_version_id = %(id)s::uuid
+WHERE d.document_version_id = %(id)s::uuid AND c.parent_chunk_id IS NULL
 ORDER BY c.chunk_index
 """
 
@@ -208,7 +215,7 @@ ORDER BY document_key, effective_from DESC NULLS LAST, retrieved_at DESC
 
 CHUNKS_SQL = """
 SELECT chunk_id::text, document_version_id, section, context, body, page_from
-FROM knowledge.chunks WHERE document_version_id = ANY(%(ids)s) ORDER BY chunk_index
+FROM knowledge.chunks WHERE document_version_id = ANY(%(ids)s) AND parent_chunk_id IS NULL ORDER BY chunk_index
 """
 
 LINKS_SQL = """

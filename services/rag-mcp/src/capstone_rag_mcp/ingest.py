@@ -1,11 +1,14 @@
 """Write public source documents into knowledge.* as rag_ingest.
 
 An existing (document_key, version_label, content_sha256) row is never rewritten.
-Only its effective range may move when a newer statute version arrives.
+Only its effective range may move when a newer statute version arrives. The one exception is the same
+statute version (same label and effective date) stored again with a new chunk layout: it replaces the
+old copy, which could not be given an end date before its own start.
 """
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 import hashlib
+import json
 from pathlib import Path
 import re
 
@@ -13,7 +16,8 @@ import psycopg
 
 from .embedding import Embedder
 from .lawapi import LawApiDocument
-from .legalize import LawVersion, blob_url
+from .links import LEGACY_KEYS
+from .pdf_vision import AUTO_TRANSCRIPTION
 
 ISSUERS = {"mfds": "식품의약품안전처", "kcia": "대한화장품협회", "law": "법제처 국가법령정보센터"}
 
@@ -35,26 +39,17 @@ class Document:
     chunks: list[dict] = field(default_factory=list)
 
 
-def from_law(version: LawVersion) -> Document:
-    meta = version.meta
-    kind = meta.get("법령구분", "")
-    issuer = meta.get("소관부처")
-    return Document(
-        document_key=f"legalize-kr:{version.path.removeprefix('kr/').removesuffix('.md')}",
-        version_label=version.version_label,
-        title=version.title,
-        issuer=", ".join(issuer) if isinstance(issuer, list) else (issuer or "unknown"),
-        collection="rules",
-        source_type="law" if kind == "법률" else "regulation",
-        source_url=blob_url(version),
-        content_sha256=version.sha256,
-        storage_key=version.storage_key,
-        published_on=_date(meta.get("공포일자")),
-        effective_from=version.effective_from,
-        effective_until=version.effective_until,
-        chunks=[{"section": c.section, "context": c.context, "body": c.body, "page_from": None}
-                for c in version.chunks],
-    )
+def law_chunks(doc: LawApiDocument) -> list[dict]:
+    return [{"section": c.section, "context": c.context, "body": c.body, "page_from": None,
+             "children": [{"section": k.section, "context": k.context, "body": k.body, "page_from": None}
+                          for k in c.children]} for c in doc.chunks]
+
+
+def law_sha256(doc: LawApiDocument) -> str:
+    """Source text plus chunk layout: re-chunking the same text (parent-child split) must give a new version."""
+    layout = json.dumps([[c.section, c.body, [k.section for k in c.children]] for c in doc.chunks],
+                        ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(doc.raw + layout).hexdigest()
 
 
 def from_lawapi(source: dict, doc: LawApiDocument) -> Document:
@@ -68,22 +63,22 @@ def from_lawapi(source: dict, doc: LawApiDocument) -> Document:
         collection="rules",
         source_type=kind,
         source_url=source["official_page"],
-        content_sha256=doc.sha256,
+        content_sha256=law_sha256(doc),
         storage_key=f"lawapi:{doc.target}:{doc.law_id}",
         published_on=doc.published_on,
         effective_from=doc.effective_from,
-        chunks=[{"section": c.section, "context": c.context, "body": c.body, "page_from": None} for c in doc.chunks],
+        chunks=law_chunks(doc),
     )
 
 
 def from_lawapi_statute(document_key: str, doc: LawApiDocument, source_url: str) -> Document:
-    """화장품법 법률, 시행령, 시행규칙 loaded from the Law API when legalize-kr is unreachable."""
+    """화장품법 법률, 시행령, 시행규칙 (S05), current version from the Law API."""
     return Document(
         document_key=document_key, version_label=doc.version_label, title=doc.title, issuer=doc.issuer,
         collection="rules", source_type="law" if doc.kind == "법률" else "regulation", source_url=source_url,
-        content_sha256=doc.sha256, storage_key=f"lawapi:{doc.target}:{doc.law_id}", published_on=doc.published_on,
+        content_sha256=law_sha256(doc), storage_key=f"lawapi:{doc.target}:{doc.law_id}", published_on=doc.published_on,
         effective_from=doc.effective_from,
-        chunks=[{"section": c.section, "context": c.context, "body": c.body, "page_from": None} for c in doc.chunks],
+        chunks=law_chunks(doc),
     )
 
 
@@ -93,7 +88,7 @@ FRONT_MATTER = ("점검표", "개정 이력", "개정이력", "이력서", "목 
 MAX_PDF_CHUNK = 1200
 
 
-def chunk_pdf_sections(pages: list[str], first_page: int = 1) -> list[dict]:
+def chunk_pdf_sections(pages: list[str], first_page: int = 1, *, slide_mode: bool = False) -> list[dict]:
     """Split guideline PDFs at their own headings (Ⅰ., 1., 가., [별표]) and keep the heading as section.
 
     Slide decks (short pages) are kept one slide per chunk with the slide title as section.
@@ -103,7 +98,7 @@ def chunk_pdf_sections(pages: list[str], first_page: int = 1) -> list[dict]:
     texts = [(n, p) for n, p in texts if p.strip() and not any(k in p[:80] for k in FRONT_MATTER)]
     if not texts:
         return []
-    if sum(len(p) for _, p in texts) / len(texts) < 500:
+    if slide_mode or sum(len(p) for _, p in texts) / len(texts) < 500:
         return [{"section": p.strip().split("\n")[0][:60], "body": p.strip(), "page_from": n, "page_until": n}
                 for n, p in texts]
     chunks: list[dict] = []
@@ -153,13 +148,26 @@ def read_pdf_pages(path: Path) -> list[str]:
 
 def from_pdf(source: dict, path: Path, *, pages: list[str] | None = None,
              page_range: tuple[int, int] | None = None, collection: str | None = None,
-             key_suffix: str = "") -> Document:
+             key_suffix: str = "", extra_chunks: list[dict] | None = None, curated: bool = False) -> Document:
     acquisition = source["acquisition"]
     raw = path.read_bytes()
     pages = pages if pages is not None else read_pdf_pages(path)
     first, last = page_range or (1, len(pages))
+    selected_pages = pages[first - 1:last]
     chunks = [{"section": c["section"], "context": source["title"], "body": c["body"], "page_from": c["page_from"],
-               "page_until": c["page_until"]} for c in chunk_pdf_sections(pages[first - 1:last], first)]
+               "page_until": c["page_until"]} for c in chunk_pdf_sections(selected_pages, first,
+                                                            slide_mode=acquisition["collection"] == "mixed_rules_cases")]
+    if source["id"] == "S01" and extra_chunks:
+        # Raw text extraction runs table columns together; rows are the precise search units.
+        table_end = max(chunk["page_until"] for chunk in extra_chunks)
+        chunks = [chunk for chunk in chunks if not ((chunk["section"] or "").startswith("[별표 ")
+                  and chunk["page_until"] <= table_end)]
+    chunks.extend({**chunk, "context": source["title"]} for chunk in (extra_chunks or []))
+    # Reviewed markdown can change while the PDF stays the same; its text must give a new version.
+    derived = "\n".join(selected_pages).encode("utf-8") if curated or any(
+        AUTO_TRANSCRIPTION in p for p in selected_pages) else b""
+    if extra_chunks:
+        derived += json.dumps(extra_chunks, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return Document(
         document_key=f"pdf:{source['id']}{key_suffix}",
         version_label=str(source.get("reported_version_date") or "unverified"),
@@ -168,7 +176,7 @@ def from_pdf(source: dict, path: Path, *, pages: list[str] | None = None,
         collection=collection or acquisition["collection"],
         source_type="case" if (collection or acquisition["collection"]) == "cases" else acquisition["source_type"],
         source_url=acquisition.get("annex_pdf_url") or source["official_page"],
-        content_sha256=hashlib.sha256(raw).hexdigest(),
+        content_sha256=hashlib.sha256(raw + derived).hexdigest(),
         storage_key=f"file:{path.name}",
         chunks=chunks,
     )
@@ -201,6 +209,7 @@ def write(conn: psycopg.Connection, doc: Document, *, corpus_version: str,
                 _embed_missing(cur, existing[0], embedder)
             conn.commit()
             return status
+        replace_rechunked(cur, doc)
         cur.execute(
             """INSERT INTO knowledge.document_versions
                (document_key, version_label, title, issuer, collection_key, source_type, source_url,
@@ -211,17 +220,61 @@ def write(conn: psycopg.Connection, doc: Document, *, corpus_version: str,
              doc.source_url, doc.published_on, doc.effective_from, doc.effective_until,
              doc.content_sha256, doc.storage_key, corpus_version))
         version_id = cur.fetchone()[0]
-        for index, chunk in enumerate(doc.chunks):
-            cur.execute(
-                """INSERT INTO knowledge.chunks (document_version_id, chunk_index, section, page_from,
-                   page_until, body, context) VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                (version_id, index, chunk["section"], chunk["page_from"], chunk.get("page_until", chunk["page_from"]),
-                 chunk["body"], chunk["context"]))
+        index = 0
+        for chunk in doc.chunks:
+            parent_id = None
+            for row in [chunk, *chunk.get("children", [])]:
+                cur.execute(
+                    """INSERT INTO knowledge.chunks (document_version_id, chunk_index, parent_chunk_id, section, page_from,
+                       page_until, body, context) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING chunk_id""",
+                    (version_id, index, parent_id, row["section"], row["page_from"],
+                     row.get("page_until", row["page_from"]), row["body"], row["context"]))
+                chunk_id = cur.fetchone()[0]
+                parent_id = parent_id or chunk_id  # children of this chunk point at it
+                index += 1
         if embedder:
             _embed_missing(cur, version_id, embedder)
         recompute_ranges(cur, doc.document_key)
     conn.commit()
     return "inserted"
+
+
+def retire_replaced(conn: psycopg.Connection, doc: Document) -> int:
+    """End the legacy legalize-kr versions of a statute the day before its Law API version takes effect.
+
+    Older versions keep answering for past review dates; none overlaps the Law API version, so a
+    reload does not leave the same statute in search twice. Returns the number of versions changed.
+    """
+    legacy = LEGACY_KEYS.get(doc.document_key)
+    if legacy is None:
+        return 0
+    until = (doc.effective_from or date.today()) - timedelta(days=1)
+    with conn.cursor() as cur:
+        cur.execute("""UPDATE knowledge.document_versions SET effective_until = %s
+                       WHERE document_key = %s AND (effective_until IS NULL OR effective_until > %s)""",
+                    (until, legacy, until))
+        changed = cur.rowcount
+    conn.commit()
+    return changed
+
+
+def replace_rechunked(cur, doc: Document) -> int:
+    """Delete stored copies of this exact statute version (same label and effective date, other content hash).
+
+    They hold the same legal text cut into different chunks; keeping both would put the article in search twice.
+    PDF guides have no effective date and keep their older versions as before.
+    """
+    if doc.effective_from is None:
+        return 0
+    cur.execute("""SELECT document_version_id FROM knowledge.document_versions
+                   WHERE document_key = %s AND version_label = %s AND effective_from = %s AND content_sha256 <> %s""",
+                (doc.document_key, doc.version_label, doc.effective_from, doc.content_sha256))
+    stale = [row[0] for row in cur.fetchall()]
+    if stale:
+        cur.execute("DELETE FROM knowledge.chunks WHERE document_version_id = ANY(%s) AND parent_chunk_id IS NOT NULL", (stale,))
+        cur.execute("DELETE FROM knowledge.chunks WHERE document_version_id = ANY(%s)", (stale,))
+        cur.execute("DELETE FROM knowledge.document_versions WHERE document_version_id = ANY(%s)", (stale,))
+    return len(stale)
 
 
 def recompute_ranges(cur, document_key: str) -> None:

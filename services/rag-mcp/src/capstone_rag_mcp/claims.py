@@ -13,16 +13,14 @@ from capstone_shared.rag_contracts import (
     RetrievalStatus,
     RuleMatch,
 )
-from .links import DOCUMENT_LAWS, article_label, law_of
+from .links import DOCUMENT_LAWS, LEGACY_KEYS, article_label, law_of
+from .pdf_tables import ANNEX_REFERENCE, annex_number
 from .retrieval import keyword_rank, load_documents, provision_row, related_rows
 from .rules import item_line, load_rules, match_rules, section_matches
 
-# A statute loaded from the Law API instead of legalize-kr (GitHub unreachable) answers for the same rule key.
-KEY_FALLBACK = {f"legalize-kr:화장품법/{kind}": f"lawapi:화장품법/{kind}" for kind in ("법률", "시행령", "시행규칙")}
-
-
 def pick(docs: dict, key: str) -> dict | None:
-    return docs.get(key) or docs.get(KEY_FALLBACK.get(key, ""))
+    # A corpus loaded before the Law API switch still has the statute under its legalize-kr key.
+    return docs.get(key) or docs.get(LEGACY_KEYS.get(key, ""))
 
 
 GENERIC_EFFECT_WORDS = re.compile(r"완화|개선|증가|감소|활성화|또는|적합|사용에|일시적|에\s|\(.*?\)|에 한함")
@@ -90,7 +88,7 @@ async def connect(dsn: str):
 async def resolve_claim_rules(dsn: str, phrase: str, claim_type: str | None, review_date: date) -> ClaimRulesResult:
     version, _ = load_rules()
     matches = match_rules(phrase, claim_type)
-    keys = sorted(set(DOCUMENT_LAWS) | set(KEY_FALLBACK.values()) | {p["document_key"] for m in matches for p in m.rule.provisions}
+    keys = sorted(set(DOCUMENT_LAWS) | set(LEGACY_KEYS.values()) | {p["document_key"] for m in matches for p in m.rule.provisions}
                   | {m.rule.evidence_rows["document_key"] for m in matches if m.rule.evidence_rows})
     async with await connect(dsn) as conn:
         await conn.execute("SET statement_timeout = '5000ms'")
@@ -117,7 +115,8 @@ async def resolve_claim_rules(dsn: str, phrase: str, claim_type: str | None, rev
                     continue
                 seen.add(key)
                 provisions.append(to_hit(row, similarity=1.0, retrieval="rule", excerpt=excerpt, item=item,
-                                         related=await expand(conn, row, docs_by_law, review_date, phrase)))
+                                         related=(await expand(conn, row, docs_by_law, review_date, phrase)) +
+                                         s01_annex_related(row, docs.get("pdf:S01"))))
             evidence = []
             if rule.evidence_rows and pick(docs, rule.evidence_rows["document_key"]):
                 doc = pick(docs, rule.evidence_rows["document_key"])
@@ -138,9 +137,22 @@ async def resolve_claim_rules(dsn: str, phrase: str, claim_type: str | None, rev
 
 async def related_for_hits(dsn: str, rows: list[dict], review_date: date, query: str) -> list[list[RelatedProvision]]:
     async with await connect(dsn) as conn:
-        docs = await load_documents(conn, sorted(DOCUMENT_LAWS), review_date)
+        docs = await load_documents(conn, sorted(set(DOCUMENT_LAWS) | {"pdf:S01"}), review_date)
         docs_by_law = group_by_law(docs)
-        return [await expand(conn, row, docs_by_law, review_date, query) for row in rows]
+        return [(await expand(conn, row, docs_by_law, review_date, query)) +
+                s01_annex_related(row, docs.get("pdf:S01")) for row in rows]
+
+
+def s01_annex_related(row: dict, doc: dict | None) -> list[RelatedProvision]:
+    """Attach the exact S01 Annex 2 table rows cited by an Annex 1 exception note."""
+    if not doc or row.get("document_key") != "pdf:S01" or not (row.get("section") or "").startswith("[별표 1]"):
+        return []
+    numbers = set(ANNEX_REFERENCE.findall(row.get("body") or ""))
+    targets = {("2", number) for number in numbers}
+    return [RelatedProvision(source=doc["title"], section=chunk["section"], excerpt=chunk["body"],
+                             version=doc["version_label"], relation="annex", document_key="pdf:S01",
+                             source_url=doc["source_url"])
+            for chunk in doc["chunks"] if annex_number(chunk["section"]) in targets]
 
 
 INGREDIENT_ANNEXES = {"별표 1": "prohibited", "별표 2": "restricted"}

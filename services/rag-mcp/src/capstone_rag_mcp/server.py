@@ -26,7 +26,8 @@ from .retrieval import Ranked, corpus_inventory, document_text, search
 
 
 def regulation_hit(item: Ranked, related=None) -> RegulationHit:
-    return to_hit(item.row, similarity=item.similarity, related=related, keyword=item.keyword, vector=item.vector)
+    return to_hit(item.row, similarity=item.similarity, related=related, keyword=item.keyword, vector=item.vector,
+                  item=item.row.get("matched_child"))
 
 
 def create_server() -> FastMCP:
