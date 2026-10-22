@@ -53,7 +53,7 @@
 <body>
 <header>
   <h1>OCR 방식 비교 (실험용, main에 합치지 않음)</h1>
-  <p class="lead">이미지를 올리면 내용 구간으로 자른 뒤, 구간마다 세 방식으로 글자와 [이미지] 묘사를 뽑아 나란히 보여 줍니다.</p>
+  <p class="lead">이미지를 올리면 내용 구간으로 자른 뒤, 구간마다 세 방식으로 광고 문구를 뽑아 나란히 보여 줍니다(이미지 묘사는 뺐음).</p>
   <div class="controls">
     <input id="file" type="file" accept="image/*">
     <button id="run" disabled>검사</button>
@@ -64,7 +64,7 @@
   <div class="legend">
     <div><b class="m1">1번</b> OCR이 읽은 줄을 LLM이 정리(이미지 안 봄) → 비전이 원본을 직접 읽으면서 정리된 OCR 줄을 받아 합침. <span class="tag ocr">OCR 덕분</span>은 비전이 OCR 참고 줄 덕분에 찾은 글자.</div>
     <div><b class="m2">2번</b> OCR은 글자 위치(번호 상자)만 → 비전이 상자마다 원본 글자를 읽고, 상자 밖 글자와 [이미지]를 묘사. <span class="tag box">상자</span>는 모델이 말한 상자 번호.</div>
-    <div><b class="m3">3번</b> 2번 구조 + 의미 덩어리로 묶기 + 이미지는 그래프, 피부, 제형만 묘사. 코드가 덩어리를 OCR 줄과 대조해 <span class="tag ok">OCR 확인</span> <span class="tag warn">숫자 불일치</span> <span class="tag vis">비전만</span>을 붙임.</div>
+    <div><b class="m3">3번</b> 2번 구조 + 의미 덩어리로 묶기. 코드가 덩어리를 OCR 줄과 대조해 <span class="tag ok">OCR 확인</span> <span class="tag warn">숫자 불일치</span> <span class="tag vis">비전만</span>을 붙임.</div>
   </div>
   <div id="out"></div>
 </main>
@@ -100,9 +100,8 @@ function blocks(list, kind) {
     return `<div class="block">${tag}${b.segments.map((s) => `<span class="seg">${esc(s)}</span>`).join(' ')}</div>`
   }).join('')
 }
-function images(list) {
-  if (!list?.length) return '<div class="images"><b>[이미지]</b> 없음</div>'
-  return `<div class="images">${list.map((d) => `<p><b>[이미지]</b> ${esc(d)}</p>`).join('')}</div>`
+function skipped(list) {
+  return `<details><summary>제품 표면 글자로 제외한 것 (${(list || []).length})</summary><p>${(list || []).map((x) => `<span class="seg">${esc(x)}</span>`).join(' ') || '없음'}</p></details>`
 }
 function methodOne(m) {
   if (m.error) return `<p class="error">${esc(m.error)}</p>`
@@ -111,14 +110,14 @@ function methodOne(m) {
     ? `<details><summary>OCR 원문과 LLM 정리 (${m.cleaned.length}줄)</summary><table>${m.cleaned.map((c) =>
         `<tr><td>${esc(c.raw)}</td><td>${c.dropped ? '<i>버림</i>' : esc(c.fixed)}</td></tr>`).join('')}</table></details>`
     : '<details><summary>OCR이 읽은 줄 없음</summary></details>'
-  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 글자 덩어리 ${m.blocks.length}개 (OCR 덕분 ${fromOcr})</div>${blocks(m.blocks, 1)}${images(m.images)}${raw}`
+  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 글자 덩어리 ${m.blocks.length}개 (OCR 덕분 ${fromOcr})</div>${blocks(m.blocks, 1)}${skipped(m.on_product)}${raw}`
 }
 function methodTwo(m) {
   if (m.error) return `<p class="error">${esc(m.error)}</p>`
   const outside = m.outside?.length ? `<div class="block"><span class="tag">상자 밖</span>${m.outside.map((s) => `<span class="seg">${esc(s)}</span>`).join(' ')}</div>` : ''
   const boxes = `<details><summary>OCR 상자 ${m.boxes.length}개 (위치와 OCR 원문)</summary><table>${m.boxes.map((b, i) =>
     `<tr><td>${i + 1}</td><td>${esc(b.text)}</td><td>${b.box.join(', ')}</td></tr>`).join('')}</table></details>`
-  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 글자 덩어리 ${m.blocks.length}개, 상자 밖 ${m.outside?.length || 0}개</div>${blocks(m.blocks, 2)}${outside}${images(m.images)}${boxes}`
+  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 글자 덩어리 ${m.blocks.length}개, 상자 밖 ${m.outside?.length || 0}개</div>${blocks(m.blocks, 2)}${outside}${skipped(m.on_product)}${boxes}`
 }
 function methodThree(m) {
   if (m.error) return `<p class="error">${esc(m.error)}</p>`
@@ -126,9 +125,8 @@ function methodThree(m) {
   const ROLE = { claim: '주장', condition: '조건', result: '결과' }
   const groups = m.groups.length ? m.groups.map((g) => `<div class="block"><span class="tag role">${ROLE[g.role] || g.role}</span>${STATUS[g.status] || ''}${g.box_ids.length ? `<span class="tag box">상자 ${g.box_ids.join(', ')}</span>` : ''}${g.segments.map((x) => `<span class="seg">${esc(x)}</span>`).join(' ')}${g.labels?.length ? `<span class="label">[${g.labels.map(esc).join(', ')}]</span>` : ''}</div>`).join('') : '<p class="meta">글자 없음</p>'
   const counts = ['confirmed', 'number_mismatch', 'vision_only'].map((k) => `${{ confirmed: '확인', number_mismatch: '숫자 불일치', vision_only: '비전만' }[k]} ${m.groups.filter((g) => g.status === k).length}`).join(', ')
-  const skipped = `<details><summary>제품 표면 글자로 제외한 것 (${m.on_product.length})</summary><p>${m.on_product.map((x) => `<span class="seg">${esc(x)}</span>`).join(' ') || '없음'}</p></details>`
-  const forward = `<details><summary>뒤로 넘기는 것 (광고 문구 ${m.forward.copy.length}, 시각 ${m.forward.visuals.length})</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(m.forward, null, 1))}</pre></details>`
-  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 덩어리 ${m.groups.length}개 (${counts})</div>${groups}${images(m.images)}${skipped}${forward}`
+  const forward = `<details><summary>뒤로 넘기는 것 (광고 문구 ${m.forward.copy.length}덩어리)</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(m.forward, null, 1))}</pre></details>`
+  return `<div class="meta">${m.seconds}초, 모델 호출 ${m.calls}회, 토큰 ${tokens(m.tokens)}, 덩어리 ${m.groups.length}개 (${counts})</div>${groups}${skipped(m.on_product)}${forward}`
 }
 function render(data) {
   const sum = (key, f) => data.sections.reduce((a, s) => a + (s[key].error ? 0 : f(s[key])), 0)

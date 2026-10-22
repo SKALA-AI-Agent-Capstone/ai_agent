@@ -36,11 +36,12 @@ TEXT_MODEL = os.getenv("TEXT_MODEL", "gpt-5.4-mini")
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""), timeout=90, max_retries=1)
 limit = asyncio.Semaphore(int(os.getenv("OCR_TEST_CONCURRENCY", "4")))
 
-FACTUAL_IMAGES = (
-    "images에는 글자를 뺀 시각 요소만 사실대로 묘사한다. 무엇이 어디에(좌측, 우측, 상단, 하단, 중앙) 있는지만 쓴다. "
-    "예: '중앙에 흰 크림 용기와 열린 뚜껑이 있음', '좌측에 주름진 이마 사진, 우측에 주름이 펴진 이마 사진이 있음'. "
-    "효과, 품질, 광고 의도, 과장 여부 같은 판단이나 평가는 절대 쓰지 않는다. 글자만 있는 배경이나 장식선은 쓰지 않는다. "
-    "시각 요소가 없으면 빈 목록이다."
+AD_ONLY = (
+    "이 서비스는 광고에 쓰인 광고 문구와 홍보 문구의 문제를 찾는다. 따라서 옮길 글자는 광고가 소비자에게 말하는 문구뿐이다: "
+    "제목, 효능과 효과 주장, 수치와 시험 결과, 설문 결과, 시험 조건 각주, 성분이나 기술 소개 문구. "
+    "제품 자체에 인쇄된 글자(용기, 상자, 라벨, 포장에 적힌 제품명, 용량, 성분 표기, 슬로건, 로고)는 옮기지 않고 on_product_text에만 따로 적는다. "
+    "구분 기준: 사진 속 사물 위에 인쇄된 글자면 제품 표면 글자, 광고 제작자가 이미지 위에 얹은 글자면 광고 문구다. "
+    "사진이나 그래프의 내용은 묘사하지 않는다. 글자만 옮긴다. "
 )
 SEGMENTS = (
     "글자는 이미지에 실제로 보이는 그대로 옮긴다. 띄어쓰기만 바르게 고치고, 단어나 숫자를 바꾸거나 추측해서 채우지 않는다. "
@@ -58,7 +59,7 @@ class Block(BaseModel):
 
 class Reading(BaseModel):
     blocks: list[Block]
-    images: list[str]
+    on_product_text: list[str]
 
 
 class CleanLine(BaseModel):
@@ -85,13 +86,12 @@ class Group(BaseModel):
 class GroupReading(BaseModel):
     groups: list[Group]
     on_product_text: list[str]  # text printed on the product itself, listed only so the exclusion can be checked
-    images: list[str]
 
 
 class BoxReading(BaseModel):
     blocks: list[BoxBlock]
     outside_boxes: list[str]
-    images: list[str]
+    on_product_text: list[str]
 
 
 # ---------- helpers ----------
@@ -163,11 +163,11 @@ async def method_one(tile, lines):
         "화장품 광고 이미지의 한 구간을 사실대로 옮긴다. " + SEGMENTS + " "
         "아래 OCR 참고 줄은 틀릴 수 있다. 이미지에서 직접 확인되는 글자만 쓰고, 이미지에서 확인되지 않는 OCR 줄은 버린다. "
         "직접 읽다가 놓쳤지만 OCR 참고 줄 덕분에 이미지에서 확인한 글자는 source='ocr', 나머지는 source='image'로 쓴다. "
-        "같은 글자를 두 번 쓰지 않는다. " + FACTUAL_IMAGES,
+        "같은 글자를 두 번 쓰지 않는다. " + AD_ONLY,
         Reading, f"OCR 참고 줄:\n{reference}", [data_url(tile.image)])
     calls += 1
     tokens.append(usage)
-    return {"ocr": lines, "cleaned": cleaned, "blocks": [b.model_dump() for b in reading.blocks], "images": reading.images,
+    return {"ocr": lines, "cleaned": cleaned, "blocks": [b.model_dump() for b in reading.blocks], "on_product": reading.on_product_text,
             "seconds": round(time.monotonic() - started, 1), "calls": calls, "tokens": tokens}
 
 
@@ -180,7 +180,7 @@ async def method_two(tile, lines):
         "화장품 광고 이미지의 한 구간이다. 첫 이미지는 원본, 두 번째는 글자가 있을 만한 위치에 번호 상자를 그린 것이다. "
         "상자마다 원본에서 그 위치의 글자를 읽어라. 상자 위치가 어긋나 있으면 가까운 글자를 읽는다. " + SEGMENTS + " "
         "각 block에는 그 글자가 들어 있던 상자 번호(box_ids)를 쓴다. 상자 밖에 있는데 상자가 놓친 글자는 outside_boxes에 쓴다. "
-        "글자가 없는 상자는 무시한다. 상자가 하나도 없으면 box_ids는 빈 목록으로 두고 모든 글자를 outside_boxes에 쓴다. " + FACTUAL_IMAGES,
+        "글자가 없는 상자는 무시한다. 상자가 하나도 없으면 box_ids는 빈 목록으로 두고 모든 글자를 outside_boxes에 쓴다. " + AD_ONLY,
         BoxReading, f"상자 좌표(구간 픽셀 기준, 너비 {tile.image.width}, 높이 {tile.image.height}):\n{boxes}",
         [data_url(tile.image), data_url(marked)])
     # The model sometimes cites box numbers that were never drawn; keep only real ones and move the rest outside.
@@ -192,15 +192,12 @@ async def method_two(tile, lines):
         else:
             outside += block.segments
     return {"boxes": lines, "annotated": data_url(marked, 1200), "blocks": blocks,
-            "outside": outside, "images": reading.images,
+            "outside": outside, "on_product": reading.on_product_text,
             "seconds": round(time.monotonic() - started, 1), "calls": 1, "tokens": [usage]}
 
 
 GROUPING = (
-    "이 서비스는 광고에 쓰인 광고 문구와 홍보 문구의 문제를 찾는다. 따라서 옮길 글자는 광고가 소비자에게 말하는 문구뿐이다: "
-    "제목, 효능과 효과 주장, 수치와 시험 결과, 설문 결과, 시험 조건 각주, 성분이나 기술 소개 문구. "
-    "제품 자체에 인쇄된 글자(용기, 상자, 라벨, 포장에 적힌 제품명, 용량, 성분 표기, 슬로건, 로고)는 옮기지 않고 on_product_text에만 따로 적는다. "
-    "구분 기준: 사진 속 사물 위에 인쇄된 글자면 제품 표면 글자, 광고 제작자가 이미지 위에 얹은 글자면 광고 문구다. "
+    AD_ONLY +
     "글자는 이미지에 실제로 보이는 그대로 옮긴다. 띄어쓰기만 바르게 고치고 단어나 숫자를 바꾸거나 추측해서 채우지 않는다. 읽을 수 없으면 [판독 불가]. "
     "글자를 **의미 덩어리**로 묶는다. 덩어리는 읽는 사람이 하나의 항목으로 이해하는 단위이고 줄 단위가 아니다. "
     "큰 수치, 그 라벨, 평가 방법 괄호, 짝이 되는 그래프의 '사용 전/후' 라벨은 하나의 덩어리다. 예: ['12.08%', '눈가 주름 감소', '(피부노화지수 평가)']. "
@@ -210,16 +207,6 @@ GROUPING = (
     "사진이나 그래프 안에 들어 있는 짧은 캡션('사용 전' 같은 글자)은 글자 덩어리가 아니라 이미지 묘사에 포함한다. "
     "위에서 아래, 왼쪽에서 오른쪽 순서로 쓴다."
 )
-VISUAL_FACTS = (
-    "images에는 효능 판단에 쓰일 시각 정보만 사실대로 쓴다. "
-    "전후 비교 사진: 어느 부위인지, 두 사진에서 보이는 피부 상태 차이(주름, 모공, 색, 질감), 조명, 각도, 확대 정도가 같은지 다른지. "
-    "그래프나 차트: 종류, 비교하는 두 대상(사용 전, 사용 후), 읽히는 수치와 단위, 축. "
-    "제형이나 질감: 크림, 세럼 등 제형과 발림, 텍스처. 인물의 피부 모습이나 사용 장면. "
-    "글자가 어디에 있는지, 글자 줄 수, 패널이나 카드의 배치와 개수, 배경, 장식선, 로고 배치, 용기의 단순 모양은 쓰지 않는다. 그래프는 무엇을 비교하는지만 쓴다. 효과나 개선 여부, 과장 같은 판단과 평가도 쓰지 않는다. "
-    "보이는 차이만 쓴다. 해당하는 시각 요소가 없으면 빈 목록이다."
-)
-
-
 def norm(text: str) -> str:
     import re
     return re.sub(r"[^0-9A-Za-z가-힣]", "", text).lower()
@@ -256,7 +243,7 @@ async def method_three(tile, lines):
     reading, usage = await parse(
         VISION_MODEL,
         "화장품 광고 이미지의 한 구간이다. 첫 이미지는 원본, 두 번째는 글자가 있을 만한 위치에 번호 상자를 그린 것이다. "
-        "상자는 읽을 위치를 알려 주는 참고일 뿐이니 글자는 원본에서 직접 읽고, 상자가 놓친 글자도 읽는다. " + GROUPING + " " + VISUAL_FACTS,
+        "상자는 읽을 위치를 알려 주는 참고일 뿐이니 글자는 원본에서 직접 읽고, 상자가 놓친 글자도 읽는다. " + GROUPING,
         GroupReading, f"상자 좌표(구간 픽셀 기준, 너비 {tile.image.width}, 높이 {tile.image.height}):\n{boxes}",
         [data_url(tile.image), data_url(marked)])
     groups = []
@@ -271,8 +258,8 @@ async def method_three(tile, lines):
     forward = {"copy": [{"role": g["role"], "text": g["segments"], "series": g["labels"],
                           "reading": {"confirmed": "ocr_confirmed", "number_mismatch": "check_numbers", "vision_only": "vision_only"}[g["status"]]}
                          for g in groups],
-               "visuals": reading.images}
-    return {"boxes": lines, "annotated": data_url(marked, 1200), "groups": groups, "images": reading.images,
+               }
+    return {"boxes": lines, "annotated": data_url(marked, 1200), "groups": groups,
             "on_product": reading.on_product_text, "forward": forward,
             "seconds": round(time.monotonic() - started, 1), "calls": 1, "tokens": [usage]}
 
