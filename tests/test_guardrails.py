@@ -19,7 +19,7 @@ def test_personal_data_masking_keeps_document_numbers():
 async def test_evidence_contact_data_is_masked_before_model_and_storage(monkeypatch):
     # The real mcp_call runs over a fake MCP client, so the mask sits on the actual tool-result boundary.
     from types import SimpleNamespace
-    from capstone_agent.review_models import RunRequest, TextAssessment, VisualAssessment
+    from capstone_agent.review_models import RunRequest, TextAssessment
     import capstone_agent.review_engine as engine
     monkeypatch.setenv("BUSINESS_MCP_URL", "http://business-mcp.invalid/mcp")
     evidence_text = "시험 담당 010-1234-5678 test@lab.kr 특허 10-1234567"
@@ -60,7 +60,7 @@ async def test_evidence_contact_data_is_masked_before_model_and_storage(monkeypa
         async def parse(self, prompt, schema, **kwargs):
             if schema is TextAssessment:
                 return schema(findings=[{"phrase":"주름 개선","reason":"합성","claimType":"wrinkle","rewrites":[]}])
-            return VisualAssessment(findings=[], unreadable=False)
+            raise AssertionError(f"unexpected schema {schema}")
         async def call_with_tools(self, messages, tools):
             model_messages.extend(m for m in messages if m["role"] == "tool")
             if any(m["role"] == "tool" for m in messages):

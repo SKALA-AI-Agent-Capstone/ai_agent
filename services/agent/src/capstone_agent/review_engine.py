@@ -17,10 +17,11 @@ import openai
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from capstone_shared.documents import prepare_document, local_ocr, Tile
+from capstone_shared.documents import prepare_document, Tile
 from capstone_shared.settings import internal_token, required_env
 from .observability import traced_client
 from .checks import cross_checks
+from .ad_reading import read_tile
 from .evidence import summarize, match as match_evidence
 from .instructions import instruction
 from .regulations import legal_basis, search_basis
@@ -28,7 +29,7 @@ from .tools import McpTools
 from .guardrails import mask_tool_result
 from .context_budget import prepare_parse, prepare_tool_messages, split_parse_text, TOOL_OUTPUT_BUDGET
 from .review_models import (
-    RunRequest, OCRLines, TextAssessment, VisualAssessment, ResultTile, RewriteSuggestion, RewriteVerification,
+    RunRequest, TextAssessment, ResultTile, RewriteSuggestion, RewriteVerification,
 )
 
 # 사람 재시도를 포함한 전체 리라이트 시도 한도. app.violations.rewrite_attempt_count가
@@ -43,10 +44,6 @@ LEGAL_NOTICE = {
     "skipped": "확인할 문구가 없어 법령 검색을 하지 않았습니다. 적합 판정을 의미하지 않습니다.",
     "not_connected": "법령 검색을 실행하지 않았습니다. 적법 여부를 판단하지 않았습니다.",
 }
-
-
-class OcrCorrection(BaseModel):
-    lines: list[str]
 
 
 class RewriteDraft(BaseModel):
@@ -65,11 +62,8 @@ class ReviewState(TypedDict, total=False):
     product: dict
     texts: list
     findings: list
-    visualFindings: list
     textStatus: str
-    visualStatus: str
     textWarnings: list
-    visualWarnings: list
     sectionTitles: dict
     result: dict
     retrievalStatus: str
@@ -105,11 +99,11 @@ class Provider:
             raise RuntimeError("OPENAI_NOT_CONFIGURED")
         bounded, output_cap, compacted = prepare_parse(
             prompt, text or "제공한 광고 영역을 분석하세요.", schema, image=bool(image))
+        images = image if isinstance(image, list) else ([image] if image else [])
         if compacted:
             logger.info("model input compacted for %s", schema.__name__)
         content = [{"type":"input_text", "text":bounded}]
-        if image:
-            content.append({"type":"input_image", "image_url":image, "detail":"high"})
+        content += [{"type":"input_image", "image_url":url, "detail":"high"} for url in images]
         request = {"input":[{"role":"system", "content":prompt}, {"role":"user", "content":content}],
                    "text_format":schema, "store":False, "max_output_tokens":output_cap}
         async with self.limit:
@@ -265,76 +259,19 @@ def assign_tile(location, manifest):
     return min(ranked)[-1] if ranked else None
 
 
-async def correct_ocr_text(provider, blocks):
-    """Tesseract(local_ocr)의 한글 음절 과분할, 띄어쓰기 오류만 교정한다. 성공했다는 것과 읽기
-    품질이 괜찮다는 것은 다르다 — Tesseract confidence는 모양 인식 확신이라 이런 분할 오류를
-    못 잡는다. 숫자, 영문, 고유명사, 의미는 추측해서 바꾸지 않고, 줄 수가 안 맞으면 원문을 그대로
-    쓴다(모델이 1:1 대응 규칙을 안 지켰다는 뜻이라 신뢰하지 않는다)."""
-    output = await provider.parse(
-        instruction("ocr_correction"),
-        OcrCorrection, text="\n".join(b["text"] for b in blocks))
-    if len(output.lines) != len(blocks):
-        return blocks
-    return [{**block, "text": text} for block, text in zip(blocks, output.lines)]
-
-
 def compact(text):
     return re.sub(r"\s+","",text)
 
 
-def prefer_vlm_spacing(found, lines):
-    """Tesseract often splits Korean syllables ("시 간 을"). When the VLM read the same characters, keep the
-    Tesseract box but use the VLM spacing."""
-    by_text={compact(line):line for line in lines if compact(line)}
-    fixed=[]
-    for block in found:
-        line=by_text.get(compact(block["text"]))
-        fixed.append({**block,"text":line,"ocrSpacing":"vlm"} if line and line!=block["text"] else block)
-    return fixed
-
-
-def missing_lines(found, lines):
-    """VLM lines that Tesseract did not read. Tesseract can drop whole lines with high confidence
-    on the lines it keeps, so its output alone cannot show what was missed."""
-    known=[compact(block["text"]) for block in found]
-    return [(i,line) for i,line in enumerate(lines)
-            if compact(line) and not any(compact(line) in k or k in compact(line) for k in known if k)]
-
-
 async def extract_text(native, tiles, provider):
+    """Ad copy of the document: native PDF text as is, and every image section read by read_tile (Tesseract boxes
+    for position, one vision call for the wording, product-surface text left out). Returns (blocks, warnings)."""
     blocks, warnings = list(native), []
-    for tile in tiles:
-        found=[]
-        try:
-            found = await asyncio.to_thread(local_ocr,tile)
-        except Exception:
-            pass
-        if found and provider.client:
-            # Tesseract 성공은 품질 보장이 아니다 — 한글 음절 과분할만 교정한다. VLM이 놓친 줄을
-            # 보충하는 아래 단계와는 다른 문제(이미 찾은 줄의 띄어쓰기)라 둘 다 필요하다.
-            try:
-                found = await correct_ocr_text(provider, found)
-            except Exception:
-                warnings.append(f"{tile.id}:OCR_CORRECTION_FAILED")
+    for tile, (found, notes) in zip(tiles, await asyncio.gather(*(read_tile(provider, tile) for tile in tiles))):
         blocks.extend(found)
-        if not provider.client:
-            if not found:
-                # A native PDF can still be read, but embedded image text is unverified.
-                warnings.append(f"{tile.id}:OCR_NOT_AVAILABLE")
-            continue
-        try:
-            output = await provider.parse(
-                instruction("ocr_transcription"),
-                OCRLines,image=tile.data_url())
-            # Keep Tesseract lines (precise boxes) and add only what it missed (region-level location).
-            corrected=prefer_vlm_spacing(found,output.lines)
-            blocks[len(blocks)-len(found):]=corrected
-            blocks.extend({"id":f"{tile.id}:vlm-ocr:{i}","text":line,
-                           "location":tile.location(method="VLM_OCR_REGION")} for i,line in missing_lines(found,output.lines))
-            if output.unreadable:
-                warnings.append(f"{tile.id}:UNREADABLE_TEXT")
-        except Exception:
-            warnings.append(f"{tile.id}:OCR_PROVIDER_FAILED")
+        warnings += notes
+        if not found and provider.client:
+            warnings.append(f"{tile.id}:NO_AD_COPY")
     return deduplicate(blocks), warnings
 
 
@@ -707,49 +644,27 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         texts, warnings = await extract_text(native,tiles,provider)
         findings = []
         status = "complete" if not warnings else "partial"
+        # Test-condition footnotes are context for the evidence comparison, not claims to review.
+        claim_texts = [t for t in texts if t.get("role") != "condition"]
+        titles = {}
+        for t in claim_texts:
+            tile_id = (t.get("location") or {}).get("tileId")
+            if tile_id and tile_id not in titles and t.get("role") == "claim":
+                titles[tile_id] = t["text"][:24]
         if not provider.client:
             status="not_configured"; warnings.append("TEXT_MODEL_NOT_CONFIGURED")
-        elif texts:
-            findings, failures = await review_text(provider, texts, manifest)
+        elif claim_texts:
+            findings, failures = await review_text(provider, claim_texts, manifest)
             if failures:
                 status="partial"; warnings += failures
         else:
             status="needs_input";warnings.append("NO_READABLE_TEXT")
         await progress(request,1)
-        return {"texts":texts,"findings":findings,"textStatus":status,"textWarnings":warnings}
-
-    async def photo_path(state):
-        findings, warnings, titles = [], [], {}
-        if not provider.client:
-            return {"visualFindings":[],"visualStatus":"not_configured","visualWarnings":["VISION_MODEL_NOT_CONFIGURED"],
-                    "sectionTitles":{}}
-        # Every tile receives a coarse visual review; text-free areas are not skipped.
-        for index,tile in enumerate(tiles):
-            try:
-                output = await provider.parse(
-                    instruction("visual_review"),
-                    VisualAssessment,image=tile.data_url())
-                if output.sectionTitle.strip():
-                    titles[tile.id]=output.sectionTitle.strip()[:30]
-                for n, item in enumerate(output.findings[:2]):
-                    entry={"id":f"visual-{index}-{n}",**item.model_dump(),"location":tile.location(),"tileId":tile.id,"reviewType":"visual"}
-                    if item.needsAdjacentContext and index+1<len(tiles):
-                        other=tiles[index+1]
-                        if other.asset_id==tile.asset_id and other.page==tile.page:
-                            # Preserve both original regions for UI and reviewer comparison.
-                            entry["relatedRegions"]=[tile.location(),other.location()]
-                    findings.append(entry)
-                if output.unreadable:
-                    warnings.append(f"{tile.id}:VISUAL_UNREADABLE")
-            except Exception:
-                warnings.append(f"{tile.id}:VISION_PROVIDER_FAILED")
-        await progress(request,2)
-        return {"visualFindings":findings,"visualStatus":"partial" if warnings else "complete","visualWarnings":warnings,
-                "sectionTitles":titles}
+        return {"texts":texts,"findings":findings,"textStatus":status,"textWarnings":warnings,"sectionTitles":titles}
 
     async def regulations(state):
         await emit(request, "tool_started", tool="legal_basis")
-        lookup = await legal_basis(state["findings"], texts=state["texts"])
+        lookup = await legal_basis(state["findings"], texts=[t for t in state["texts"] if t.get("role") != "condition"])
         await emit(request, "tool_finished", tool="legal_basis", ok=lookup["status"] in ("connected", "skipped"))
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
@@ -763,12 +678,14 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         await progress(request,3)
         titles=state.get("sectionTitles",{})
         return {"result":{"texts":state["texts"],"tiles":[{**t,"title":titles.get(t["id"])} for t in manifest],
-            "findings":state["findings"],"visualFindings":state["visualFindings"],
+            "findings":state["findings"],"visualFindings":[],
             "evidence":evidence,"publicData":public,"patents":patents,"usage":{"credits":0,"billingEnabled":False},
             "standardsSnapshot":state.get("standardsSnapshot",[]),"retrievalStatus":state.get("retrievalStatus","not_connected"),
             "legalStatus":"not_evaluated","businessToolSelection":tool_trace,
-            "pipelineStatus":{"text":state["textStatus"],"visual":state["visualStatus"]},
-            "warnings":list(dict.fromkeys(state["textWarnings"]+state["visualWarnings"]+warnings+state.get("legalWarnings",[])
+            # Photos and graphs are not reviewed (this service reads ad copy only). The backend still expects a visual
+            # status and an empty list of visual findings: complete and empty, or not_configured without a model key.
+            "pipelineStatus":{"text":state["textStatus"],"visual":"complete" if provider.client else "not_configured"},
+            "warnings":list(dict.fromkeys(state["textWarnings"]+warnings+state.get("legalWarnings",[])
                 +[LEGAL_NOTICE.get(state.get("retrievalStatus"),LEGAL_NOTICE["not_connected"])])),
             "analyzedAt":datetime.now(timezone.utc).isoformat()}}
 
@@ -826,13 +743,12 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         return {"decision":decision}
 
     graph=StateGraph(ReviewState)
-    graph.add_node("text_path",text_path);graph.add_node("photo_path",photo_path)
+    graph.add_node("text_path",text_path)
     graph.add_node("regulations",regulations)
     graph.add_node("business",business);graph.add_node("cross_checks",checks);graph.add_node("violations",violations)
     graph.add_node("approval",approval)
     graph.add_node("report",lambda state:{"reportReady":True})
-    graph.add_edge(START,"text_path");graph.add_edge(START,"photo_path")
-    graph.add_edge(["text_path","photo_path"],"regulations");graph.add_edge("regulations","business")
+    graph.add_edge(START,"text_path");graph.add_edge("text_path","regulations");graph.add_edge("regulations","business")
     graph.add_edge("business","cross_checks");graph.add_edge("cross_checks","violations")
     graph.add_edge("violations","approval")
     graph.add_edge("approval","report");graph.add_edge("report",END)

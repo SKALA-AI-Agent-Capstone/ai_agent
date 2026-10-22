@@ -6,10 +6,8 @@
 
 | 파일 | 쓰는 곳 |
 | --- | --- |
-| ocr_correction.md | Tesseract 줄의 한글 음절, 띄어쓰기 교정 |
-| ocr_transcription.md | 타일 이미지의 글자 전사(VLM) |
+| ad_copy_reading.md | 구간 이미지의 광고 문구 읽기(번호 상자 참고, 의미 덩어리와 역할, 제품 표면 글자 제외) |
 | text_review.md | 광고 문구의 확인할 주장 추출 |
-| visual_review.md | 타일별 사진, 도표 검토와 구간 제목 |
 | severity_assessment.md | 문구별 검토 우선순위 등급 |
 | rewrite_draft.md | 수정 문구 작성 |
 | rewrite_verification.md | 수정 문구 재검증(자동 제안과 사람이 쓴 문구 모두) |

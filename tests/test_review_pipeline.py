@@ -6,13 +6,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from capstone_shared.documents import Tile, tile_image, prepare_document
-from capstone_agent.review_engine import (build_graph, Provider, deduplicate, correct_ocr_text, OcrCorrection,
+from capstone_agent.review_engine import (build_graph, Provider, deduplicate, RewriteDraft as OcrCorrection,
     tile_manifest, assign_tile)
 
 
 async def test_long_text_eval_cases_keep_claims_in_every_position(monkeypatch):
     import capstone_agent.review_engine as engine
-    from capstone_agent.review_models import TextAssessment, VisualAssessment
+    from capstone_agent.review_models import TextAssessment
 
     monkeypatch.setenv("MODEL_INPUT_TOKEN_BUDGET", "3000")
     cases = json.loads((Path(__file__).parent / "data/text_review_eval.json").read_text(encoding="utf-8"))
@@ -34,7 +34,7 @@ async def test_long_text_eval_cases_keep_claims_in_every_position(monkeypatch):
                     self.seen.append(chunk)
                     return TextAssessment(findings=[{"phrase":phrase,"reason":"합성 평가", "claimType":"exaggeration","rewrites":[]}
                         for phrase in set(case["expected"]) for _ in range(chunk.count(phrase))])
-                return VisualAssessment(sectionTitle="",findings=[],unreadable=False)
+                raise AssertionError(f"unexpected schema {schema}")
 
         provider = FakeProvider()
         graph = build_graph([], [], provider, InMemorySaver())
@@ -49,7 +49,7 @@ async def test_long_text_eval_cases_keep_claims_in_every_position(monkeypatch):
 
 async def test_failed_text_chunk_is_reported_while_later_chunks_continue(monkeypatch):
     import capstone_agent.review_engine as engine
-    from capstone_agent.review_models import TextAssessment, VisualAssessment
+    from capstone_agent.review_models import TextAssessment
 
     monkeypatch.setenv("MODEL_INPUT_TOKEN_BUDGET", "3000")
     ad = "일반적인 사용감.\n" * 500 + "마지막 문구는 모든 피부병을 치료합니다."
@@ -69,7 +69,7 @@ async def test_failed_text_chunk_is_reported_while_later_chunks_continue(monkeyp
                 phrase = "모든 피부병을 치료합니다"
                 return TextAssessment(findings=[{"phrase":phrase,"reason":"합성 평가","claimType":"drug","rewrites":[]}]
                                       if phrase in kwargs["text"] else [])
-            return VisualAssessment(sectionTitle="",findings=[],unreadable=False)
+            raise AssertionError(f"unexpected schema {schema}")
 
     provider = FakeProvider()
     output = await build_graph([], [], provider, InMemorySaver()).ainvoke(
@@ -80,25 +80,6 @@ async def test_failed_text_chunk_is_reported_while_later_chunks_continue(monkeyp
     assert result["pipelineStatus"]["text"] == "partial"
     assert "TEXT_REVIEW_CHUNK_FAILED:1" in result["warnings"]
     assert [finding["phrase"] for finding in result["findings"]] == ["모든 피부병을 치료합니다"]
-
-
-async def test_ocr_correction_fixes_broken_spacing_without_changing_line_count():
-    class FakeProvider:
-        async def parse(self,prompt,schema,**kwargs):
-            return OcrCorrection(lines=["7일 주름 개선","SPF50 PA++++"])
-    blocks=[{"id":"a","text":"7 일 주 름 개 선","location":{}},{"id":"b","text":"SPF50 PA++++","location":{}}]
-    fixed=await correct_ocr_text(FakeProvider(),blocks)
-    assert [b["text"] for b in fixed]==["7일 주름 개선","SPF50 PA++++"]
-    assert fixed[0]["id"]=="a" and fixed[1]["id"]=="b"  # location/id survive, only text replaced
-
-
-async def test_ocr_correction_falls_back_to_raw_text_on_line_count_mismatch():
-    class BadProvider:
-        async def parse(self,prompt,schema,**kwargs):
-            return OcrCorrection(lines=["합쳐버린 한 줄"])
-    blocks=[{"id":"a","text":"원문 1","location":{}},{"id":"b","text":"원문 2","location":{}}]
-    result=await correct_ocr_text(BadProvider(),blocks)
-    assert result is blocks
 
 
 def fixed_tiles(height=3000, size=1600, overlap=240):
@@ -201,8 +182,8 @@ async def test_missing_provider_does_not_invent_findings_or_sources(monkeypatch)
     assert "runToken" not in resumed
 
 
-async def test_both_paths_have_independent_results_and_checkpoint_contains_no_pixels(monkeypatch):
-    from capstone_agent.review_models import TextAssessment,VisualAssessment
+async def test_ad_copy_review_reports_no_visual_findings_and_checkpoint_contains_no_pixels(monkeypatch):
+    from capstone_agent.review_models import TextAssessment
     import capstone_agent.review_engine as engine
     from capstone_agent.review_engine import RewriteDraft,RewriteVerification
     async def ocr(native,tiles,provider):
@@ -218,15 +199,14 @@ async def test_both_paths_have_independent_results_and_checkpoint_contains_no_pi
                 return RewriteDraft(text="자료 확인 중인 주름 개선 효과")
             if schema is RewriteVerification:
                 return RewriteVerification(passed=True,reasoning="합성 재검증 통과")
-            return VisualAssessment(sectionTitle="사용 전후 비교",findings=[{"observation":"합성 비교 구성","concern":"촬영 조건 확인","comparisonLimitations":[],"needsAdjacentContext":False}],unreadable=False)
+            raise AssertionError(f"unexpected schema {schema}")
     tile=tile_image(Image.new("RGB",(64,64)),"a","synthetic.png")[0]
     graph=build_graph([], [tile],FakeProvider(),InMemorySaver())
     output=await graph.ainvoke({"reviewId":"r","tenantId":"t","versionNo":1,"product":{}},
                               {"configurable":{"thread_id":"t:r:1"}})
     assert len(output["result"]["findings"])==1
-    assert len(output["result"]["visualFindings"])==1
-    assert [(t["id"],t["title"]) for t in output["result"]["tiles"]]==[(tile.id,"사용 전후 비교")]
-    assert output["result"]["visualFindings"][0]["tileId"]==tile.id
+    assert output["result"]["visualFindings"]==[] and output["result"]["pipelineStatus"]["visual"]=="complete"
+    assert [t["id"] for t in output["result"]["tiles"]]==[tile.id]
     assert output["result"]["findings"][0]["tileId"] is None  # synthetic OCR block has no box or tile
     assert "data:image" not in str(output)
     assert output["result"]["findings"][0]["basis"]==[]
@@ -243,7 +223,7 @@ async def test_both_paths_have_independent_results_and_checkpoint_contains_no_pi
 async def test_result_findings_keep_tile_and_later_severity_updates(monkeypatch):
     # The violations node updates the finding dicts in place; the result must carry both that
     # severity and the tileId set when the finding was created.
-    from capstone_agent.review_models import TextAssessment,VisualAssessment
+    from capstone_agent.review_models import TextAssessment
     import capstone_agent.review_engine as engine
     tile=tile_image(Image.new("RGB",(64,64)),"a","synthetic.png")[0]
     async def ocr(native,tiles,provider):
@@ -260,18 +240,17 @@ async def test_result_findings_keep_tile_and_later_severity_updates(monkeypatch)
         async def parse(self,prompt,schema,**kwargs):
             if schema is TextAssessment:
                 return schema(findings=[{"phrase":"주름 개선","reason":"합성","claimType":"wrinkle","rewrites":[]}])
-            return VisualAssessment(sectionTitle="합성 구간",findings=[{"observation":"합성","concern":"합성","comparisonLimitations":[],"needsAdjacentContext":False}],unreadable=False)
+            raise AssertionError(f"unexpected schema {schema}")
     graph=build_graph([], [tile],FakeProvider(),InMemorySaver())
     output=await graph.ainvoke({"reviewId":"r","tenantId":"t","versionNo":1,"product":{}},
                               {"configurable":{"thread_id":"t:r:2"}})
     finding=output["result"]["findings"][0]
     assert finding["severity"]=="high" and finding["escalation"]["reason"]=="합성 상향"
     assert finding["tileId"]==tile.id
-    assert output["result"]["visualFindings"][0]["tileId"]==tile.id
 
 
 async def test_rewrite_retry_limit_stops_auto_suggestions_for_manual_input(monkeypatch):
-    from capstone_agent.review_models import TextAssessment,VisualAssessment
+    from capstone_agent.review_models import TextAssessment
     import capstone_agent.review_engine as engine
     from capstone_agent.review_engine import RewriteDraft,RewriteVerification,REWRITE_RETRY_LIMIT
     async def ocr(native,tiles,provider):
@@ -288,7 +267,7 @@ async def test_rewrite_retry_limit_stops_auto_suggestions_for_manual_input(monke
                 return RewriteDraft(text=f"시도 {len(attempts)}")
             if schema is RewriteVerification:
                 return RewriteVerification(passed=False,reasoning="여전히 절대적 표현")
-            return VisualAssessment(sectionTitle="",findings=[],unreadable=False)
+            raise AssertionError(f"unexpected schema {schema}")
     graph=build_graph([],[],NeverPassingProvider(),InMemorySaver())
     output=await graph.ainvoke({"reviewId":"r","tenantId":"t","versionNo":1,"product":{}},
                               {"configurable":{"thread_id":"t:r:2"}})
@@ -614,14 +593,14 @@ async def test_provider_tries_fallback_model_only_for_retryable_failures(monkeyp
             if model == "primary-model":
                 raise self.error
             class Done:
-                output_parsed = OcrCorrection(lines=["대체 모델 결과"])
+                output_parsed = OcrCorrection(text="대체 모델 결과")
             return Done()
     class FakeClient:
         def __init__(self, error):
             self.responses = Responses(error)
     provider.client = FakeClient(_api_error(openai.RateLimitError, 429))
     result = await provider.parse("합성", OcrCorrection, text="합성")
-    assert result.lines == ["대체 모델 결과"] and calls == ["primary-model", "fallback-model"]
+    assert result.text == "대체 모델 결과" and calls == ["primary-model", "fallback-model"]
 
     calls.clear()
     provider.client = FakeClient(_api_error(openai.BadRequestError, 400))
