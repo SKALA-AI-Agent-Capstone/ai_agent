@@ -222,11 +222,19 @@ def prepare_evidence(raw: bytes, asset: dict, max_pages=EVIDENCE_MAX_PAGES) -> t
     return blocks, scans, count
 
 
-def local_ocr(tile: Tile) -> list[dict]:
-    """Tesseract confidence belongs to this engine; it is not legal certainty."""
+def local_ocr(tile: Tile, scale: float = 1.0) -> list[dict]:
+    """Tesseract confidence belongs to this engine; it is not legal certainty.
+
+    scale < 1 reads a shrunk copy: Tesseract misses very large headline letters at full size. Boxes are mapped
+    back to the original pixels either way."""
     import pytesseract
-    data = pytesseract.image_to_data(tile.image, lang="kor+eng", timeout=20,
+    image = tile.image if scale == 1.0 else tile.image.resize(
+        (max(1, round(tile.image.width * scale)), max(1, round(tile.image.height * scale))), Image.LANCZOS)
+    data = pytesseract.image_to_data(image, lang="kor+eng", timeout=20,
                                      output_type=pytesseract.Output.DICT)
+    if scale != 1.0:
+        for name in ("left", "top", "width", "height"):
+            data[name] = [round(v / scale) for v in data[name]]
     lines = {}
     for i, text in enumerate(data["text"]):
         if not text.strip():
@@ -245,7 +253,8 @@ def local_ocr(tile: Tile) -> list[dict]:
         words = [{"text": data["text"][i], "bbox": [(data["left"][i]+tile.box[0])/width, (data["top"][i]+tile.box[1])/height,
                   (data["left"][i]+data["width"][i]+tile.box[0])/width, (data["top"][i]+data["height"][i]+tile.box[1])/height]}
                  for i in indices]
-        result.append({"id":f"{tile.id}:ocr:{key}", "text":text, "words":words,
+        suffix = "" if scale == 1.0 else f":x{scale:g}"
+        result.append({"id":f"{tile.id}:ocr:{key}{suffix}", "text":text, "words":words,
             "ocrConfidence":sum(float(data["conf"][i]) for i in indices)/len(indices),
             "location":tile.location(precise_box=[left/width,top/height,right/width,bottom/height],method="TESSERACT")})
     return result

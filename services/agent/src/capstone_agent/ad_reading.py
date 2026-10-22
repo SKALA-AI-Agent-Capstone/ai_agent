@@ -51,18 +51,38 @@ def strip_product(segments: list[str], on_product: list[str]) -> list[str]:
     return kept
 
 
-def matching_lines(text: str, lines: list[dict]) -> list[dict]:
-    """Tesseract lines whose text appears in a group. Used for the position only, never for the wording."""
-    target = norm(text)
-    hits = []
-    for line in lines:
-        seen = norm(line["text"])
-        if not seen or not target:
-            continue
-        size = SequenceMatcher(None, seen, target).find_longest_match(0, len(seen), 0, len(target)).size
-        if seen in target or size >= max(3, int(len(seen) * 0.6)):
-            hits.append(line)
+def line_score(line: dict, text: str) -> float:
+    """How well an OCR line spells part of a group: 1 when the whole line is in the group, else the share of the
+    line in the longest common run, 0 below the match bar. Used for the position only, never for the wording."""
+    seen, target = norm(line["text"]), norm(text)
+    if not seen or not target:
+        return 0.0
+    if seen in target:
+        return 1.0
+    size = SequenceMatcher(None, seen, target).find_longest_match(0, len(seen), 0, len(target)).size
+    return size / len(seen) if size >= max(3, int(len(seen) * 0.6)) else 0.0
+
+
+def assign_lines(texts: list[str], numbers: list[list[int]], lines: list[dict]) -> list[list[dict]]:
+    """Each OCR line goes to the one group it matches best. A footnote that repeats the headline's words
+    ('개선 효과') must not take the headline's line. A box the model named counts when its text still
+    resembles the group (Tesseract garbles large styled Korean)."""
+    hits = [[] for _ in texts]
+    for i, line in enumerate(lines, 1):
+        scores = []
+        for g, text in enumerate(texts):
+            score = line_score(line, text)
+            if i in numbers[g] and SequenceMatcher(None, norm(line["text"]), norm(text)).ratio() >= 0.3:
+                score = max(score, 0.9)
+            # Ties go to the group the line makes up more of (a headline line, not a footnote fragment).
+            scores.append(score + (0.01 * len(norm(line["text"])) / max(1, len(norm(text))) if score else 0))
+        if scores and max(scores) > 0:
+            hits[scores.index(max(scores))].append(line)
     return hits
+
+
+def overlaps(a, b) -> bool:
+    return min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
 
 
 def union_box(lines: list[dict]):
@@ -86,14 +106,10 @@ def vision_box(tile: Tile, box: list[float]):
 
 
 def merge_boxes(seen, model):
-    """Tesseract lines give the exact edges; the model box adds lines Tesseract missed, but only when it overlaps them."""
-    if not model:
-        return seen, "TESSERACT" if seen else None
-    if not seen:
-        return model, "VISION"
-    if min(seen[2], model[2]) > max(seen[0], model[0]) and min(seen[3], model[3]) > max(seen[1], model[1]):
-        return [min(seen[0], model[0]), min(seen[1], model[1]), max(seen[2], model[2]), max(seen[3], model[3])], "TESSERACT+VISION"
-    return seen, "TESSERACT"
+    """Tesseract lines give the exact edges. The model box is used only when no OCR line belongs to the group."""
+    if seen:
+        return seen, "TESSERACT"
+    return (model, "VISION") if model else (None, None)
 
 
 def section_box(tile: Tile, line: dict) -> list[float]:
@@ -139,9 +155,14 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
     warnings = []
     try:
         lines = await asyncio.to_thread(local_ocr, tile)
+        lines = [line for line in lines if line["location"].get("bbox")]
+        # Large headline letters are often missed at full size; a half-size read finds them.
+        small = await asyncio.to_thread(local_ocr, tile, 0.5)
+        lines += [line for line in small if line["location"].get("bbox") and len(norm(line["text"])) >= 2
+                  and not any(overlaps(line["location"]["bbox"], kept["location"]["bbox"]) for kept in lines)]
+        lines.sort(key=lambda line: (line["location"]["bbox"][1], line["location"]["bbox"][0]))
     except Exception:
         lines, warnings = [], [f"{tile.id}:OCR_NOT_AVAILABLE"]
-    lines = [line for line in lines if line["location"].get("bbox")]
     if not provider.client:
         return tesseract_blocks(tile, lines), warnings
     boxes = "\n".join(
@@ -154,19 +175,14 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
             text=f"글자가 있을 만한 위치의 번호 상자(구간 이미지 픽셀 기준, 너비 {tile.image.width}, 높이 {tile.image.height}):\n{boxes}")
     except Exception:
         return tesseract_blocks(tile, lines), warnings + [f"{tile.id}:OCR_PROVIDER_FAILED"]
-    blocks = []
+    groups = []
     for n, group in enumerate(reading.groups):
         segments = strip_product([x.strip() for x in group.segments if x.strip()], reading.on_product_text)
-        if not segments:
-            continue
-        text = " ".join(segments)
-        hits = matching_lines(text, lines)
-        # Tesseract often garbles large or styled Korean, so the wording match misses the line. A box the model
-        # named is used when its text still resembles the group a little.
-        for number in group.box_numbers:
-            line = lines[number - 1] if 1 <= number <= len(lines) else None
-            if line and line not in hits and SequenceMatcher(None, norm(line["text"]), norm(text)).ratio() >= 0.3:
-                hits.append(line)
+        if segments:
+            groups.append((n, group, segments, " ".join(segments)))
+    assigned = assign_lines([g[3] for g in groups], [g[1].box_numbers for g in groups], lines)
+    blocks = []
+    for (n, group, segments, text), hits in zip(groups, assigned):
         box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
         words = [w for line in hits for w in line.get("words", [])]
         blocks.append({"id": f"{tile.id}:copy:{n}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
