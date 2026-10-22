@@ -68,6 +68,19 @@ def to_basis(hit: dict, rule: dict | None = None) -> dict:
                  "적용 여부와 위반 판단은 담당자가 원문으로 확인합니다.")
     else:
         plain = "검색으로 찾은 관련 기준 후보입니다. 적용 여부와 위반 판단은 담당자가 원문으로 확인합니다."
+    expression = re.search(r"금지 표현:\s*[·•]?\s*([^\n]+)", hit.get("excerpt", ""))
+    terms = re.findall(r"[가-힣]{2,}", expression.group(1)) if expression and "[별표2]" in hit.get("excerpt", "") else []
+    def score(row):
+        return sum(term in row.get("excerpt", "") for term in terms)
+    selected = {}
+    for row in hit.get("related", []):
+        key = (row.get("source"), row.get("section"), row.get("relation"))
+        if key not in selected or score(row) > score(selected[key]):
+            selected[key] = row
+    related = []
+    for row in selected.values():
+        related.append({"sourceName": row["source"], "article": row.get("section"), "relation": row["relation"],
+                        "original": row["excerpt"], "version": row["version"], "sourceUrl": row.get("source_url")})
     return {
         "sourceId": hit["document_key"],
         "sourceType": SOURCE_TYPES.get(hit.get("source_type", ""), "law"),
@@ -84,9 +97,7 @@ def to_basis(hit: dict, rule: dict | None = None) -> dict:
         "vectorScore": hit.get("vector_score"),
         "retrieval": hit.get("retrieval", "search"),
         "ruleId": rule["rule_id"] if rule else None,
-        "related": [{"sourceName": r["source"], "article": r.get("section"), "relation": r["relation"],
-                     "original": r["excerpt"], "version": r["version"], "sourceUrl": r.get("source_url")}
-                    for r in hit.get("related", [])],
+        "related": related,
     }
 
 
@@ -159,6 +170,7 @@ async def sweep_findings(call, texts: list[dict], findings: list[dict]) -> list[
 
     The phrase is the whole OCR line, so it is grounded in the ad text like model findings are.
     """
+    texts = [text for text in texts if text.get("documentContext") != "patent_certificate"]
     if not texts:
         return []
     result = await call("rag", "scan_claim_lines", {"lines": [t["text"] for t in texts]})

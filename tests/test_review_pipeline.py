@@ -297,6 +297,31 @@ def test_patent_error_envelope_is_not_no_results():
     assert result["status"]=="error"
 
 
+def test_expired_patent_is_found_with_its_title():
+    from capstone_business_mcp.review_tools import parse_patents
+    xml = ("<response><successYN>Y</successYN><resultCode>00</resultCode><item>"
+           "<registerNumber>1004403570000</registerNumber><registerStatus>소멸</registerStatus>"
+           "<inventionTitle>레반 추출물을 함유한 화장료 조성물</inventionTitle>"
+           "</item></response>")
+    result = parse_patents(xml, "10-0440357", "synthetic")
+    assert result["status"] == "expired"
+    assert result["data"]["title"] == "레반 추출물을 함유한 화장료 조성물"
+    assert result["data"]["registerStatus"] == "소멸"
+
+
+def test_basis_related_links_keep_one_copy_per_provision():
+    from capstone_agent.regulations import to_basis
+    link = {"source": "화장품 표시, 광고 관리 지침", "section": "[별표 2] > 1.",
+            "relation": "cites", "excerpt": "실증자료에 따른 표현", "version": "2025-08-14"}
+    matching = {**link, "excerpt": "실증 대상: 기미, 주근깨 완화에 도움. 미백 기능성화장품 심사(보고) 자료로 입증"}
+    hit = {"document_key": "pdf:S01", "source_type": "guideline", "source": "화장품 표시, 광고 관리 지침",
+           "section": "[별표 1]", "excerpt": "금지 표현: 기미, 주근깨\n비고: 단, [별표2] 1.에 해당하는 표현은 제외",
+           "version": "2025-08-14", "related": [link] * 3 + [matching] + [link] * 2}
+    related = to_basis(hit)["related"]
+    assert len(related) == 1
+    assert "기미, 주근깨 완화" in related[0]["original"]
+
+
 async def test_public_api_configuration_is_not_a_product_absence(monkeypatch):
     from capstone_business_mcp.review_tools import functional_report
     monkeypatch.delenv("MFDS_SERVICE_KEY",raising=False)

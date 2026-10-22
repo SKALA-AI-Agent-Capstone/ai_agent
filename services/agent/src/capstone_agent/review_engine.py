@@ -28,6 +28,7 @@ from .regulations import legal_basis, search_basis
 from .judged_basis import judged_basis
 from .tools import McpTools
 from .guardrails import mask_tool_result
+from .patent_certificate import group_patent_certificate, patent_numbers
 from .context_budget import prepare_parse, prepare_tool_messages, split_parse_text, TOOL_OUTPUT_BUDGET
 from .review_models import (
     RunRequest, TextAssessment, ResultTile, RewriteSuggestion, RewriteVerification,
@@ -146,7 +147,16 @@ def basis_context(basis):
     """Statute text handed to the rewrite prompt. Excerpts are retrieved text, not instructions."""
     if not basis:
         return "(검색된 조문 없음)"
-    return "\n".join(f"- {b['sourceName']} {b['article']}: {b['original'][:600]}" for b in basis)
+    lines = []
+    for item in basis:
+        lines.append(f"- {item['sourceName']} {item['article']}: {item['original'][:600]}")
+        annexes = [related for related in item.get("related", [])
+                   if related.get("relation") == "annex" and
+                   (related.get("article") or "").startswith("[별표 2] >")]
+        if annexes:
+            lines.append("  연결된 실증 대상과 조건 (비고가 인용한 항목이며, 표현별 적용 여부 확인 필요):")
+            lines.extend(f"  - {related['article']}: {related['original'][:450]}" for related in annexes[:8])
+    return "\n".join(lines)
 
 
 class RewriteRejected(Exception):
@@ -274,7 +284,7 @@ async def extract_text(native, tiles, provider):
         warnings += notes
         if not found and provider.client:
             warnings.append(f"{tile.id}:NO_AD_COPY")
-    return deduplicate(blocks), warnings
+    return group_patent_certificate(deduplicate(blocks)), warnings
 
 
 async def mcp_call(name, arguments, request=None):
@@ -480,7 +490,7 @@ async def select_business_tools(provider, state, request):
     product = state["product"]
     report = product.get("functionalReportNo", "")
     text = "\n".join(t["text"] for t in state["texts"])
-    candidate_numbers = list(dict.fromkeys(re.sub(r"[-– ]", "-", n) for n in re.findall(r"\b10[-– ]\d{7}\b", text)))[:10]
+    candidate_numbers = patent_numbers(text)[:10]
     available = {
         "structure_evidence": bool(documents),
         "verify_functional_approval": bool(product.get("name")),
@@ -628,6 +638,8 @@ async def review_text(provider, texts, manifest=()):
             if match is None:
                 continue  # Reject ungrounded or cross-block model spans.
             source, start = match
+            if source.get("documentContext") == "patent_certificate" and not patent_numbers(issue.phrase):
+                continue  # Filing/registration dates describe the certificate; they are not efficacy claims.
             findings.append({"id":f"text-{len(findings)}","phrase":issue.phrase,"start":start,"end":start+len(issue.phrase),
                 "location":source["location"],"textId":source["id"],"tileId":assign_tile(source["location"],manifest),
                 "severity":"low","baseSeverity":"low",
