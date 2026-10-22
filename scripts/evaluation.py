@@ -133,7 +133,7 @@ LABELS = {"recall": "탐지율", "model_recall": "모델 단독 탐지율", "pre
 
 
 def compare_table(before: dict, after: dict) -> str:
-    """Table of two runs for the evaluation log (docs/13-harness-evaluation.md), headed by their labels."""
+    """Table of two runs for the evaluation log (backend/docs/13-harness-evaluation.md), headed by their labels."""
     names = before["config"]["label"], after["config"]["label"]
     rows = [f"| 지표 | {names[0]} | {names[1]} | 차이 |", "| --- | --- | --- | --- |"]
     for key in METRICS:

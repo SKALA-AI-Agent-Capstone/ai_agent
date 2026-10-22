@@ -23,4 +23,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Evaluation scoring lives with its runner in scripts/, outside the deployed services.
+pythonpath = ["scripts"]
 asyncio_mode = "auto"
