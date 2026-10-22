@@ -241,7 +241,11 @@ def local_ocr(tile: Tile) -> list[dict]:
         top = min(data["top"][i] for i in indices) + tile.box[1]
         right = max(data["left"][i]+data["width"][i] for i in indices)+tile.box[0]
         bottom = max(data["top"][i]+data["height"][i] for i in indices)+tile.box[1]
-        result.append({"id":f"{tile.id}:ocr:{key}", "text":text,
+        # Word boxes let a later step mark the exact problem words inside a line.
+        words = [{"text": data["text"][i], "bbox": [(data["left"][i]+tile.box[0])/width, (data["top"][i]+tile.box[1])/height,
+                  (data["left"][i]+data["width"][i]+tile.box[0])/width, (data["top"][i]+data["height"][i]+tile.box[1])/height]}
+                 for i in indices]
+        result.append({"id":f"{tile.id}:ocr:{key}", "text":text, "words":words,
             "ocrConfidence":sum(float(data["conf"][i]) for i in indices)/len(indices),
             "location":tile.location(precise_box=[left/width,top/height,right/width,bottom/height],method="TESSERACT")})
     return result

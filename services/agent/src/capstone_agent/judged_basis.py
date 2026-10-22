@@ -15,6 +15,7 @@ Without a model key the regulations node keeps the code-only path (regulations.l
 """
 import asyncio
 from datetime import date
+from difflib import SequenceMatcher
 import json
 import re
 import time
@@ -93,7 +94,24 @@ async def judge(provider, findings: list[dict], texts_by_id: dict) -> dict[str, 
     return {j.id: j for j in output.judgments}
 
 
-def apply_judgment(finding: dict, judgment: Judgment | None) -> dict:
+def span_box(span: str, block: dict | None):
+    """Page-ratio box of the OCR words that spell the problem span, or None when no word matches."""
+    target = squeeze(re.sub(r"[^0-9A-Za-z가-힣%.]", "", span)).lower()
+    boxes = []
+    for word in (block or {}).get("words", []):
+        seen = re.sub(r"[^0-9A-Za-z가-힣%.]", "", word["text"]).lower()
+        if not seen or not target:
+            continue
+        # A word counts when most of it is part of the span ('입증된' for the span '임상으로 입증').
+        size = SequenceMatcher(None, seen, target).find_longest_match(0, len(seen), 0, len(target)).size
+        if size >= max(1, round(min(len(seen), len(target)) * 0.6)) and (size >= 2 or len(seen) == 1):
+            boxes.append(word["bbox"])
+    if not boxes:
+        return None
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+
+
+def apply_judgment(finding: dict, judgment: Judgment | None, block: dict | None = None) -> dict:
     """The span marks the exact problem words for the red highlight; one the model did not copy is ignored."""
     if judgment is None:
         return finding
@@ -102,7 +120,8 @@ def apply_judgment(finding: dict, judgment: Judgment | None) -> dict:
     at = finding["phrase"].find(judgment.span) if judgment.span else -1
     if at >= 0:
         start = finding.get("start", 0) + at
-        updated["problemSpan"] = {"text": judgment.span, "start": start, "end": start + len(judgment.span)}
+        updated["problemSpan"] = {"text": judgment.span, "start": start, "end": start + len(judgment.span),
+                                  "bbox": span_box(judgment.span, block)}
     return updated
 
 
@@ -222,9 +241,14 @@ async def verify(provider, finding: dict, line: str, found: Candidates, ids: lis
 
 
 def verified_basis(found: Candidates, verdicts: dict[str, BasisVerdict]) -> tuple[list[dict], list[dict]]:
-    basis, references = [], []
+    basis, references, cited = [], [], set()
     for cid, verdict in verdicts.items():
         item = found.items[cid]
+        # Two chunks of one article (or one guideline heading) are one citation on the card.
+        cite = (item["hit"]["source"], item["hit"].get("section"), item["hit"].get("item"))
+        if cite in cited:
+            continue
+        cited.add(cite)
         if item["kind"] == "case":
             hit = item["hit"]
             references.append({"id": f"{hit['document_key']}:{hit.get('page')}", "verified": True, "summary": verdict.why,
@@ -293,7 +317,7 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
                 dismissed.append({"id": finding["id"], "phrase": finding["phrase"], "textId": finding.get("textId"),
                                   "reason": judgment.reason, "source": finding.get("source", "model")})
             else:
-                kept.append(apply_judgment(finding, judgment))
+                kept.append(apply_judgment(finding, judgment, texts_by_id.get(finding.get("textId"))))
         limit = asyncio.Semaphore(4)
 
         async def one(finding):

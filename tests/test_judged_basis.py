@@ -83,7 +83,7 @@ async def test_judges_first_then_keeps_only_basis_the_verifier_quoted():
     # The rule sweep's '3중' line is judged not a concern and leaves the findings.
     assert [d["phrase"] for d in out["dismissed"]] == ["오랫동안 촉촉한 윤기 3중 식물성 오일"]
     [card] = out["findings"]
-    assert card["problemSpan"] == {"text": "임상으로 입증", "start": 0, "end": 7}
+    assert card["problemSpan"] == {"text": "임상으로 입증", "start": 0, "end": 7, "bbox": None}
     # The model wrote the query; the code filled in the date and the size.
     search = next(a for t, a in rag.calls if t == "search_regulations")
     assert search["query_text"] == "시험 결과 표시 실증" and search["review_date"]
@@ -121,3 +121,10 @@ async def test_tool_loop_stops_at_the_guardrail():
     trace = await jb.gather(model, rag, finding("f1", "a", "t1"), "a", DAY, found)
     searches = [t for t in trace if t.get("tool") == "search_regulations"]
     assert len(searches) == jb.MAX_SAME_BASIS_TOOL
+
+
+def test_problem_span_box_is_the_union_of_the_matching_ocr_words():
+    block = {"words": [{"text": "임상으로", "bbox": [0.1, 0.1, 0.2, 0.12]}, {"text": "입증된", "bbox": [0.21, 0.1, 0.3, 0.12]},
+                       {"text": "주름", "bbox": [0.31, 0.1, 0.36, 0.12]}]}
+    assert jb.span_box("임상으로 입증", block) == [0.1, 0.1, 0.3, 0.12]
+    assert jb.span_box("미백", block) is None

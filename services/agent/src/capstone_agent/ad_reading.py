@@ -160,6 +160,8 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
         text = " ".join(segments)
         hits = matching_lines(text, lines)
         box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
+        words = [w for line in hits for w in line.get("words", [])]
         blocks.append({"id": f"{tile.id}:copy:{n}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
+                       "words": words,
                        "location": tile.location(precise_box=box, method=method or "VISION_COPY_REGION")})
     return blocks, warnings
