@@ -22,3 +22,7 @@ reports/
 *.env
 secrets/
 credentials/
+
+# Evaluation source documents (real reports and ad images) stay local
+/evals/*/fixtures/*
+!/evals/*/fixtures/README.md

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from capstone_agent.evaluation import average, compare_table, score_case, summarize, validate
+from evaluation import average, compare_table, score_case, summarize, validate
 
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = {"drug": [{"source": "화장품법", "article": "제13조"}]}
@@ -19,7 +19,7 @@ def finding(line, phrase, claim_type="drug", source=None, basis=()):
 
 
 def test_labelled_set_is_scorable():
-    data = json.loads((ROOT / "evals" / "harness_cases.json").read_text(encoding="utf-8"))
+    data = json.loads((ROOT / "evals" / "2026-10-21" / "harness_cases.json").read_text(encoding="utf-8"))
     assert validate(data) == []
     assert len(data["cases"]) >= 20
 
