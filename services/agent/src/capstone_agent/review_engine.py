@@ -25,6 +25,7 @@ from .ad_reading import read_tile
 from .evidence import summarize, match as match_evidence
 from .instructions import instruction
 from .regulations import legal_basis, search_basis
+from .judged_basis import judged_basis
 from .tools import McpTools
 from .guardrails import mask_tool_result
 from .context_budget import prepare_parse, prepare_tool_messages, split_parse_text, TOOL_OUTPUT_BUDGET
@@ -38,7 +39,7 @@ from .review_models import (
 REWRITE_RETRY_LIMIT = 3
 
 LEGAL_NOTICE = {
-    "connected": "법령 근거는 검색으로 찾은 조문 후보입니다. 적법 여부는 판정하지 않았으며 담당자가 원문으로 확인해야 합니다.",
+    "connected": "법령 근거는 검색으로 찾은 조문 중 검증을 통과한 것입니다. 적법 여부는 판정하지 않았으며 담당자가 원문으로 확인해야 합니다.",
     "not_indexed": "법령 자료가 적재되지 않아 근거를 검색하지 못했습니다. 적법 여부를 판단하지 않았습니다.",
     "error": "법령 검색 서비스에 연결하지 못해 근거를 확인하지 못했습니다. 적법 여부를 판단하지 않았습니다.",
     "skipped": "확인할 문구가 없어 법령 검색을 하지 않았습니다. 적합 판정을 의미하지 않습니다.",
@@ -69,6 +70,7 @@ class ReviewState(TypedDict, total=False):
     retrievalStatus: str
     standardsSnapshot: list
     legalWarnings: list
+    dismissedFindings: list
     decision: str
     reportReady: bool
 
@@ -664,21 +666,27 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
 
     async def regulations(state):
         await emit(request, "tool_started", tool="legal_basis")
-        lookup = await legal_basis(state["findings"], texts=[t for t in state["texts"] if t.get("role") != "condition"])
+        claim_texts = [t for t in state["texts"] if t.get("role") != "condition"]
+        # With a model: judge, pick basis tools per claim, verify apart (judged_basis.py). Without one: rules and search.
+        if provider.client:
+            lookup = await judged_basis(state["findings"], provider, texts=claim_texts, section_texts=state["texts"])
+        else:
+            lookup = await legal_basis(state["findings"], texts=claim_texts)
         await emit(request, "tool_finished", tool="legal_basis", ok=lookup["status"] in ("connected", "skipped"))
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
             if not finding.get("tileId"):
                 finding["tileId"] = assign_tile(finding.get("location"), manifest)
         return {"findings": lookup["findings"], "retrievalStatus": lookup["status"],
-                "standardsSnapshot": lookup["snapshot"], "legalWarnings": lookup["warnings"]}
+                "standardsSnapshot": lookup["snapshot"], "legalWarnings": lookup["warnings"],
+                "dismissedFindings": lookup.get("dismissed", [])}
 
     async def business(state):
         evidence,public,patents,warnings,tool_trace=await select_business_tools(provider,state,request)
         await progress(request,3)
         titles=state.get("sectionTitles",{})
         return {"result":{"texts":state["texts"],"tiles":[{**t,"title":titles.get(t["id"])} for t in manifest],
-            "findings":state["findings"],"visualFindings":[],
+            "findings":state["findings"],"dismissedFindings":state.get("dismissedFindings",[]),"visualFindings":[],
             "evidence":evidence,"publicData":public,"patents":patents,"usage":{"credits":0,"billingEnabled":False},
             "standardsSnapshot":state.get("standardsSnapshot",[]),"retrievalStatus":state.get("retrievalStatus","not_connected"),
             "legalStatus":"not_evaluated","businessToolSelection":tool_trace,

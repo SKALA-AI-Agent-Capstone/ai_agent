@@ -146,7 +146,10 @@ async def test_graph_runs_legal_basis_then_cross_checks_and_rewrites_with_the_ba
         return {"findings": [{**f, "checks": [{"type": "substantiation", "status": "evidence_missing"}]} for f in findings], "summary": {}, "warnings": []}
 
     monkeypatch.setattr(engine, "extract_text", ocr)
-    monkeypatch.setattr(engine, "legal_basis", fake_basis)
+    async def fake_judged(findings, provider, **kwargs):
+        return await fake_basis(findings)
+
+    monkeypatch.setattr(engine, "judged_basis", fake_judged)
     monkeypatch.setattr(engine, "cross_checks", fake_checks)
     prompts = []
 

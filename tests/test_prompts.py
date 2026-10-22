@@ -18,7 +18,7 @@ def _calls_and_system_messages(tree):
 def test_every_model_prompt_is_loaded_from_a_prompt_file():
     files = {p.stem for p in PROMPTS.glob("*.md") if p.name != "README.md"}
     used = set()
-    for module in ("review_engine.py", "checks.py", "evidence.py", "ad_reading.py"):
+    for module in ("review_engine.py", "checks.py", "evidence.py", "ad_reading.py", "judged_basis.py"):
         tree = ast.parse((PROMPTS.parent / module).read_text(encoding="utf-8"))
         for kind, prompt in _calls_and_system_messages(tree):
             if kind == "system message" and isinstance(prompt, ast.Name):

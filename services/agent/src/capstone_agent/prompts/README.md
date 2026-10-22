@@ -7,7 +7,11 @@
 | 파일 | 쓰는 곳 |
 | --- | --- |
 | ad_copy_reading.md | 구간 이미지의 광고 문구 읽기(번호 상자 참고, 의미 덩어리와 역할, 제품 표면 글자 제외) |
+| literal_reread.md | OCR과 비전 읽기가 다를 때 그 영역만 확대해서 글자 그대로 다시 읽기 |
 | text_review.md | 광고 문구의 확인할 주장 추출 |
+| claim_judgment.md | 추출된 후보와 규칙 후보가 실제로 문제 될 주장인지 판단, 문제 글자 범위와 근거 목적 지정 |
+| basis_tool_selection.md | 법령 근거 도구 선택 루프(규칙, 법령 검색, 사례 중 목적에 맞는 도구 고르기) |
+| basis_verification.md | 찾은 조항이 문구에 적용되는지 독립 검증(앞 판단을 보지 않음) |
 | severity_assessment.md | 문구별 검토 우선순위 등급 |
 | rewrite_draft.md | 수정 문구 작성 |
 | rewrite_verification.md | 수정 문구 재검증(자동 제안과 사람이 쓴 문구 모두) |
