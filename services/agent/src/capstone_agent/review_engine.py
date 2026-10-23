@@ -26,6 +26,7 @@ from .evidence import summarize, match as match_evidence
 from .instructions import instruction
 from .regulations import legal_basis, search_basis
 from .judged_basis import judged_basis
+from .overreach import review_overreach
 from .tools import McpTools
 from .guardrails import mask_tool_result
 from .patent_certificate import group_patent_certificate, patent_numbers
@@ -93,7 +94,7 @@ class Provider:
         key = os.getenv("OPENAI_API_KEY", "").strip()
         retries = int(os.getenv("MODEL_MAX_RETRIES", "2"))
         self.client = AsyncOpenAI(api_key=key, timeout=50, max_retries=retries) if key else None
-        self.limit = asyncio.Semaphore(int(os.getenv("MODEL_CONCURRENCY", "2")))
+        self.limit = asyncio.Semaphore(int(os.getenv("MODEL_CONCURRENCY", "4")))
         if self.client:
             self.client = traced_client(self.client)
 
@@ -684,7 +685,9 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         claim_texts = [t for t in state["texts"] if t.get("role") != "condition"]
         # With a model: judge, pick basis tools per claim, verify apart (judged_basis.py). Without one: rules and search.
         if provider.client:
-            lookup = await judged_basis(state["findings"], provider, texts=claim_texts, section_texts=state["texts"])
+            # The overreach review releases cards nothing in the ad supports before any basis is fetched for them.
+            lookup = await judged_basis(state["findings"], provider, texts=claim_texts, section_texts=state["texts"],
+                                        review=lambda cards: review_overreach(provider, cards, state["texts"]))
         else:
             lookup = await legal_basis(state["findings"], texts=claim_texts)
         await emit(request, "tool_finished", tool="legal_basis", ok=lookup["status"] in ("connected", "skipped"))
@@ -765,10 +768,18 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         decision=interrupt({"reviewId":state["reviewId"],"versionNo":state["versionNo"],"gate":"human_review"})
         return {"decision":decision}
 
+    def timed(name, node):
+        async def run(state):
+            started = time.monotonic()
+            out = await node(state)
+            logger.info("node %s took %.1fs", name, time.monotonic() - started)
+            return out
+        return run
+
     graph=StateGraph(ReviewState)
-    graph.add_node("text_path",text_path)
-    graph.add_node("regulations",regulations)
-    graph.add_node("business",business);graph.add_node("cross_checks",checks);graph.add_node("violations",violations)
+    graph.add_node("text_path",timed("text_path",text_path))
+    graph.add_node("regulations",timed("regulations",regulations))
+    graph.add_node("business",timed("business",business));graph.add_node("cross_checks",timed("cross_checks",checks));graph.add_node("violations",timed("violations",violations))
     graph.add_node("approval",approval)
     graph.add_node("report",lambda state:{"reportReady":True})
     graph.add_edge(START,"text_path");graph.add_edge("text_path","regulations");graph.add_edge("regulations","business")

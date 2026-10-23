@@ -197,3 +197,33 @@ async def test_every_figure_row_is_a_card_even_when_extraction_skips_it_or_the_j
     out = await judged_basis([finding("f1", "탄성 4.5% 개선", "r1")], Judge([]), texts=texts, section_texts=texts, call=rag)
     assert sorted(f["textId"] for f in out["findings"]) == ["r1", "r2", "r3"]  # r2 kept despite the judge, r3 added
     assert out["dismissed"] == []
+
+
+def test_a_bare_number_in_a_list_row_is_not_forced_as_a_figure_claim():
+    assert jb.is_figure_row({"kind": "table", "text": "보습 12.3% 개선"})
+    assert not jb.is_figure_row({"kind": "table", "text": "7"})  # a scale tick says nothing to substantiate
+    assert not jb.is_figure_row({"kind": "copy", "text": "보습 12.3% 개선"})
+
+
+async def test_the_overreach_review_releases_cards_before_any_basis_is_fetched():
+    texts = [text("t1", "탄성 복원 63.91% 개선"), text("t2", "촉촉한 제형")]
+    rag = Rag([[SUBSTANTIATION]])
+
+    class Judge(Model):
+        async def parse(self, prompt, schema, **kwargs):
+            self.seen.append((schema.__name__, kwargs["text"]))
+            if schema is ClaimJudgments:
+                return ClaimJudgments(judgments=[
+                    {"id": "f1", "problem": True, "claimType": "clinical", "span": "63.91%", "purpose": "실증", "reason": "수치"},
+                    {"id": "f2", "problem": True, "claimType": "exaggeration", "span": "촉촉한", "purpose": "-", "reason": "-"}])
+            return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
+
+    async def review(cards):
+        return [c for c in cards if c["id"] == "f1"], [{"id": "f2", "phrase": "촉촉한 제형", "source": "overreach_review"}], []
+
+    model = Judge([])
+    out = await judged_basis([finding("f1", "탄성 복원 63.91% 개선", "t1"), finding("f2", "촉촉한 제형", "t2", "exaggeration")],
+                             model, texts=texts, call=rag, review=review)
+    assert [f["id"] for f in out["findings"]] == ["f1"]
+    assert [d["source"] for d in out["dismissed"]] == ["overreach_review"]
+    assert sum(1 for name, _ in model.seen if name == "BasisCheck") == 1  # only the kept card is verified
