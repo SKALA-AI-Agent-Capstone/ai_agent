@@ -80,12 +80,27 @@ def main(require_queue=False):
         return response.json()["balance"]
     assert balance()==2*review_cost
     checks.append("synthetic author funded for two reviews at server-configured cost")
-    metadata={"product":{"name":"Synthetic-only product","functionalReportNo":"SYNTHETIC"},"media":[],"evidence":[{"docType":"other"}]}
     image=synthetic_image();pdf=synthetic_pdf()
+    # Evidence is registered on the product and read once (Agent /internal/evidence/parse through the evidence queue);
+    # a review uses that stored result instead of reading files it was sent.
+    response=call("POST","/products",author,files={"metadata":(None,json.dumps({"name":"Synthetic-only product"}))})
+    assert response.status_code==201,response.text
+    product_id=response.json()["id"]
+    response=call("POST",f"/products/{product_id}/evidence",author,data={"docType":"other"},
+        files={"file":("synthetic-evidence.pdf",pdf,"application/pdf")})
+    assert response.status_code==202,(response.status_code,response.text)
+    evidence_id=response.json()["id"];deadline=time.monotonic()+100
+    while time.monotonic()<deadline:
+        evidence=call("GET",f"/products/{product_id}/evidence/{evidence_id}",author).json()
+        if evidence["status"]!="reading":
+            break
+        time.sleep(1)
+    assert evidence["status"]=="done",evidence
+    checks.append("product evidence read once through the evidence queue")
+    metadata={"productId":product_id,"product":{"name":"Synthetic-only product","functionalReportNo":"SYNTHETIC"},"media":[]}
     def upload(path):
         response=call("POST",path,author,data={"metadata":json.dumps(metadata)},files=[
-            ("files",("synthetic.png",image,"image/png")),("files",("synthetic.pdf",pdf,"application/pdf")),
-            ("evidence",("synthetic-evidence.pdf",pdf,"application/pdf"))])
+            ("files",("synthetic.png",image,"image/png")),("files",("synthetic.pdf",pdf,"application/pdf"))])
         assert response.status_code==202,(response.status_code,response.text)
         return response.json()
     review=upload("/reviews");rid=review["id"]
@@ -137,11 +152,11 @@ def main(require_queue=False):
         expected={"skipped"} if not result["findings"] else {"connected","not_indexed"}
         assert result["retrievalStatus"] in expected and result["legalStatus"]=="not_evaluated",result["retrievalStatus"]
         assert result["visualFindings"]==[] and result["pipelineStatus"]["visual"]=="not_configured"
-        assert result["evidence"]["text"] and result["publicData"]["reportNo"]=="SYNTHETIC" and result["publicData"]["status"],result["publicData"]
+        assert "SYNTHETIC" in result["evidence"]["text"] and result["publicData"]["reportNo"]=="SYNTHETIC" and result["publicData"]["status"],result["publicData"]
         assert result["patents"] and result["patents"][0]["id"]=="10-1234567",result["patents"]
         assert "data:image" not in json.dumps(review)
         assert "runToken" not in json.dumps(review)
-        checks.append("real PNG and PDF bytes, local OCR, evidence via authenticated MCP")
+        checks.append("real PNG and PDF bytes, local OCR, stored product evidence via authenticated MCP")
         assert call("GET",f"/reviews/{rid}",other["accessToken"]).status_code==404
         # The finished analysis is the report: no review approval, completion state or re-review.
         response=call("GET",f"/reviews/{rid}",reviewer)

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from capstone_shared.reading import image_ratio, read_pdf
+
 AUTO_TRANSCRIPTION = "[이미지 자동 전사 - 원본 대조 필요]"
 # Model read the image, re-checked it against the image and passed deterministic checks; no human review.
 AUTO_VERIFIED = "[이미지 자동 전사 - 모델 원본 재대조 통과, 사람 검수 전]"
@@ -20,14 +22,14 @@ class VisualTranscription(BaseModel):
     uncertain: bool
 
 
-def needs_vision(page, native_text: str) -> bool:
+def wants_vision(image_ratio: float, native_text: str) -> bool:
     """Select large image tables/slides without reprocessing normal text pages."""
-    area = float(page.width * page.height)
-    if not area or len(native_text.strip()) >= 350:
-        return False
-    image_area = sum(max(0, image["x1"] - image["x0"]) *
-                     max(0, image["bottom"] - image["top"]) for image in page.images)
-    return image_area / area >= 0.35
+    return len(native_text.strip()) < 350 and image_ratio >= 0.35
+
+
+def needs_vision(page, native_text: str) -> bool:
+    """The same rule for a pdfplumber page (the curation tool still walks pdfplumber pages for table cells)."""
+    return wants_vision(image_ratio(page), native_text)
 
 
 def _image_url(picture) -> str:
@@ -109,28 +111,30 @@ def merge_page_text(native_text: str, visual_text: str) -> str:
 def read_pages_for_index(path: Path, *, page_numbers: set[int] | None = None,
                          transcriber=transcribe_page, renderer=render_page,
                          retry_renderer=render_page_columns, on_warning=None) -> list[str]:
-    import pdfplumber
-
-    with pdfplumber.open(path) as pdf:
-        if len(pdf.pages) > 500:
-            raise ValueError("PUBLIC_DOCUMENT_PAGE_LIMIT")
-        pages = []
-        for index, page in enumerate(pdf.pages):
-            native = page.extract_text() or ""
-            if (page_numbers is None or index + 1 in page_numbers) and needs_vision(page, native):
+    pages = []
+    for index, page in enumerate(read_public_pdf(path).pages):
+        native = page.text
+        if (page_numbers is None or index + 1 in page_numbers) and wants_vision(page.image_ratio, native):
+            try:
                 try:
-                    try:
-                        visual = transcriber(renderer(path, index), native)
-                    except PdfVisionError as error:
-                        if str(error) not in ("RAG_PDF_VISION_REVIEW_REQUIRED", "RAG_PDF_VISION_NO_NEW_TEXT"):
-                            raise
-                        visual = transcriber(retry_renderer(path, index), native)
-                    native = merge_page_text(native, visual)
-                except Exception as error:
-                    if on_warning is not None:
-                        on_warning({"page": index + 1, "reason": str(error) if isinstance(error, PdfVisionError)
-                                    else "RAG_PDF_VISION_FAILED"})
-                    # A title alone is not a usable citation for the image's table.
-                    native = ""
-            pages.append(native)
+                    visual = transcriber(renderer(path, index), native)
+                except PdfVisionError as error:
+                    if str(error) not in ("RAG_PDF_VISION_REVIEW_REQUIRED", "RAG_PDF_VISION_NO_NEW_TEXT"):
+                        raise
+                    visual = transcriber(retry_renderer(path, index), native)
+                native = merge_page_text(native, visual)
+            except Exception as error:
+                if on_warning is not None:
+                    on_warning({"page": index + 1, "reason": str(error) if isinstance(error, PdfVisionError)
+                                else "RAG_PDF_VISION_FAILED"})
+                # A title alone is not a usable citation for the image's table.
+                native = ""
+        pages.append(native)
     return pages
+
+
+def read_public_pdf(path: Path):
+    """Text layer and page kind of every page of a public PDF, by the shared page reader. Nothing is OCR'd here:
+    picture pages go to the vision transcription above, or to a reviewed MD (batch.read_source_pages)."""
+    return read_pdf(path.read_bytes(), max_pages=500, max_ocr_pages=0, max_bytes=None,
+                    page_limit_error="PUBLIC_DOCUMENT_PAGE_LIMIT")

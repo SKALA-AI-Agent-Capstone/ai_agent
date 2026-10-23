@@ -38,13 +38,14 @@ def test_only_image_page_is_transcribed_before_chunking(monkeypatch, tmp_path):
         def __exit__(self, *args):
             pass
     monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda path: OpenPdf()))
+    (tmp_path / "S04.pdf").write_bytes(b"%PDF-1.7 synthetic")
     calls = []
     def transcribe(image, native):
         calls.append((image, native))
         return "개정 전: 추출용매 제외\n개정 후: 추출용매 포함\n<예시> 녹차추출물 2%"
     pages = read_pages_for_index(tmp_path / "S04.pdf", page_numbers={2}, transcriber=transcribe,
                                  renderer=lambda path, index: f"image:{index}")
-    assert pages[0] == first.text
+    assert pages[0] == first.text.strip()  # the shared reader trims the text layer
     assert calls == [("image:1", second.text)]
     assert "개정 후: 추출용매 포함" in pages[1]
     assert pages[1].startswith(second.text)
@@ -85,6 +86,7 @@ def test_uncertain_page_retries_cropped_table_and_keeps_other_pages(monkeypatch,
         def __exit__(self, *args):
             pass
     monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda path: OpenPdf()))
+    (tmp_path / "S04.pdf").write_bytes(b"%PDF-1.7 synthetic")
     calls = []
     def transcribe(images, native):
         calls.append(images)
@@ -98,7 +100,7 @@ def test_uncertain_page_retries_cropped_table_and_keeps_other_pages(monkeypatch,
                                  on_warning=warnings.append)
     assert calls == ["full", ["left", "right"]]
     assert warnings == []
-    assert pages[0] == first.text
+    assert pages[0] == first.text.strip()  # the shared reader trims the text layer
     assert "개정 후: 추출용매 포함" in pages[1]
 
 
@@ -137,6 +139,7 @@ def test_persistent_uncertainty_skips_only_that_page(monkeypatch, tmp_path):
         def __exit__(self, *args):
             pass
     monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda path: OpenPdf()))
+    (tmp_path / "S04.pdf").write_bytes(b"%PDF-1.7 synthetic")
     warnings = []
     def uncertain(images, native):
         raise PdfVisionError("RAG_PDF_VISION_REVIEW_REQUIRED")
@@ -144,5 +147,5 @@ def test_persistent_uncertainty_skips_only_that_page(monkeypatch, tmp_path):
                                  renderer=lambda path, index: "full",
                                  retry_renderer=lambda path, index: ["left", "right"],
                                  on_warning=warnings.append)
-    assert pages == [first.text, ""]
+    assert pages == [first.text.strip(), ""]
     assert warnings == [{"page": 2, "reason": "RAG_PDF_VISION_REVIEW_REQUIRED"}]

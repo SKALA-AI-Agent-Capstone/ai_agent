@@ -22,13 +22,14 @@ async def test_stored_result_is_passed_on_with_issuer_code_version_and_the_produ
             "id": "e1", "name": "report.pdf", "docType": "clinical_test", "pages": 53, "text": "9.71% 변화율",
             "issuer": {"key": "ksrc", "name": "KSRC"}, "codes": [{"label": "연구 코드", "value": "HBSE-MGE-24032"}],
             "version": "Version 1.0 · 2024-04", "unreadPages": [], "productPages": [6, 7], "results": [{"changePct": 9.71}],
-            "productNotInReport": False, "readerVersion": "r1"}]})
+            "checkPages": [7], "productNotInReport": False, "readerVersion": "r1"}]})
     serve(monkeypatch, handler)
     result = await call()
     assert seen == {"path": "/internal/reviews/r/product-evidence", "query": b"versionNo=1", "run": "run-token"}
     assert result["status"] == "extracted" and "9.71%" in result["text"] and result["failures"] == []
     document = result["documents"][0]
     assert document["codes"][0]["value"] == "HBSE-MGE-24032" and document["productPages"] == [6, 7]
+    assert document["checkPages"] == [7]          # pages where OCR and the vision model read different figures
 
 
 async def test_unread_pages_and_a_product_missing_from_the_report_are_reported_not_hidden(monkeypatch):
