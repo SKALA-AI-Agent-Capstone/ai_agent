@@ -53,7 +53,7 @@ ROLE_OF_KIND = {"copy": "claim", "table": "result", "footnote": "condition", "ce
 
 def join_spaced(text: str) -> str:
     """Letters spread out by design ('특 허 증') become the word they spell ('특허증')."""
-    return re.sub(r"(?<![가-힣])[가-힣](?: [가-힣]){2,}(?![가-힣])", lambda m: m.group(0).replace(" ", ""), text or "")
+    return re.sub(r"(?<![가-힣])[가-힣](?:\s+[가-힣]){2,}(?![가-힣])", lambda m: re.sub(r"\s+", "", m.group(0)), text or "")
 
 
 def norm(text: str) -> str:
@@ -396,6 +396,8 @@ CERTIFICATE_FIELD = re.compile(r"특허증|특허\s*제|허\s*제\s*\d{7}|출원
 
 def certificate_field(text: str) -> bool:
     """The block is a field of a certificate and nothing else ('출원일 2001년 10월 25일', '특허 제 0440357 호')."""
+    if re.fullmatch(r"특\s*허\s*청\s*장?[\sA-Za-z,.'’-]*", text.strip()):
+        return True  # the issuing office line, its English name as OCR or the model happens to read it
     rest = norm(CERTIFICATE_FIELD.sub("", text))
     return bool(CERTIFICATE_FIELD.search(text)) and len(rest) <= 4
 

@@ -310,6 +310,7 @@ def test_a_bare_number_read_by_the_vision_does_not_hide_the_certificate_label():
 
 def test_letters_spread_out_by_design_are_joined_into_the_word():
     assert ad_reading.join_spaced("특 허 증") == "특허증"
+    assert ad_reading.join_spaced("특  허\u00a0청") == "특허청"
     assert ad_reading.join_spaced("출 원 일 2001년 10월 25일") == "출원일 2001년 10월 25일"
     assert ad_reading.join_spaced("눈가 주름 12.08% 개선") == "눈가 주름 12.08% 개선"
 
@@ -383,4 +384,6 @@ def test_a_certificate_gets_back_the_title_the_vision_read_dropped():
 def test_the_issuing_office_under_a_certificate_is_part_of_it():
     assert ad_reading.certificate_field("특허청")
     assert ad_reading.certificate_field("특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE")
+    assert ad_reading.certificate_field("특 허 청")
+    assert ad_reading.certificate_field("특허청 COMMERCIALIZATION OF KOREAN INTELLECTUAL PROPERTY")
     assert not ad_reading.certificate_field("볼꺼짐 탄력섬유재생!")
