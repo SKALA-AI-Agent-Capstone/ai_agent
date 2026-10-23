@@ -138,12 +138,10 @@ def chunk_pdf_sections(pages: list[str], first_page: int = 1, *, slide_mode: boo
 
 
 def read_pdf_pages(path: Path) -> list[str]:
-    import pdfplumber
+    """Text layer of every page, by the shared page reader (no OCR; picture pages are handled in batch)."""
+    from .pdf_vision import read_public_pdf
 
-    with pdfplumber.open(path) as pdf:
-        if len(pdf.pages) > 500:
-            raise ValueError("PUBLIC_DOCUMENT_PAGE_LIMIT")
-        return [page.extract_text() or "" for page in pdf.pages]
+    return [page.text for page in read_public_pdf(path).pages]
 
 
 def from_pdf(source: dict, path: Path, *, pages: list[str] | None = None,

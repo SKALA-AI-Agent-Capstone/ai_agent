@@ -161,3 +161,42 @@ def test_engine_choice_falls_back_to_tesseract_and_says_so(monkeypatch):
     output = ocr_engine.read_image(image)
     assert (output.engine, output.fell_back) == ("tesseract", True)
     assert ocr_engine.read_image(image, prefer="tesseract").fell_back is False
+
+
+def test_lines_keep_their_place_ids_and_unmapped_glyphs(monkeypatch):
+    result = read_pdf(text_pdf(REPORT), max_ocr_pages=0, with_lines=True)
+    line = result.pages[0].lines[0]
+    assert line["index"] == 0 and "HBSE-MGE-24032" in line["text"]
+    assert all(0 <= v <= 1 for v in line["bbox"]) and line["bbox"][0] < line["bbox"][2]
+    assert read_pdf(text_pdf(REPORT)).pages[0].lines is None          # only when asked
+
+
+def test_a_text_layer_read_never_renders_a_page(monkeypatch):
+    def no_render(*args, **kwargs):
+        raise AssertionError("pdfium must not be opened for a text-layer read")
+
+    raw = combine(text_pdf(REPORT), picture_pdf())
+    monkeypatch.setattr(reading.pdfium, "PdfDocument", no_render)
+    result = read_pdf(raw, max_ocr_pages=0)
+    assert [p.kind for p in result.pages] == ["text", "scan"] and result.pages[1].image_ratio > 0.9
+
+
+def test_callers_choose_their_own_limits(monkeypatch):
+    with pytest.raises(ValueError, match="PDF_PAGE_LIMIT"):
+        read_pdf(picture_pdf(pages=3), max_pages=2, max_ocr_pages=0, page_limit_error="PDF_PAGE_LIMIT")
+    raw = text_pdf(REPORT)
+    with pytest.raises(ValueError, match="FILE_TOO_LARGE"):
+        read_pdf(raw, max_bytes=len(raw) - 1, max_ocr_pages=0)
+    assert read_pdf(raw, max_bytes=None, max_ocr_pages=0).page_count == 1   # public documents have no size cap
+
+
+def test_rag_index_and_ad_text_lines_come_from_the_shared_reader(tmp_path):
+    from capstone_rag_mcp import ingest
+    from capstone_shared.documents import prepare_document
+
+    pdf = tmp_path / "X.pdf"
+    pdf.write_bytes(text_pdf(REPORT))
+    assert ingest.read_pdf_pages(pdf) == [read_pdf(pdf.read_bytes()).pages[0].text]
+    blocks, tiles = prepare_document(pdf.read_bytes(), {"id": "a", "name": "ad.pdf"})
+    assert blocks[0]["id"] == "a:p1:l0" and blocks[0]["location"]["coordinateSource"] == "PDF_TEXT"
+    assert tiles and tiles[0].page == 1
