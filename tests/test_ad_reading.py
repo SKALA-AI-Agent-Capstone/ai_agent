@@ -252,3 +252,53 @@ async def test_a_confident_ocr_line_is_not_overruled_by_two_matching_vision_read
 
     [block], _ = await read_tile(Provider(), t)
     assert block["readCheck"]["status"] == "needs_review" and block["readCheck"]["ocr"] == "7종 피부 노화 징후"
+
+
+async def test_a_patent_number_in_the_image_survives_when_the_vision_read_leaves_the_certificate_out(monkeypatch):
+    from capstone_agent.patent_certificate import patent_numbers
+    t = tile()
+    monkeypatch.setattr(ad_reading.paddle_ocr, "enabled", lambda: True)
+    # PaddleOCR drops the first letter of the spaced-out label: '허 제 0440357 호'.
+    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines",
+                        lambda tile: paddle_fake(tile, [("허 제 0440357 호", 40), ("불꺼짐 탄력섬유재생!", 100)]))
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            return AdCopy(on_product_text=[], groups=[
+                {"role": "claim", "segments": ["불꺼짐 탄력섬유재생!"], "labels": [], "box_numbers": [2], "box": []}])
+
+    blocks, _ = await read_tile(Provider(), t)
+    certificate = [b for b in blocks if b.get("documentContext") == "patent_certificate"]
+    assert [b["text"] for b in certificate] == ["특허 제 0440357 호"] and certificate[0]["role"] == "condition"
+    assert patent_numbers("\n".join(b["text"] for b in blocks)) == ["10-0440357"]
+
+
+def test_a_label_spelled_out_in_one_letter_lines_still_yields_the_patent_number():
+    from capstone_agent.patent_certificate import patent_numbers
+    t = tile()
+    width, height = t.source_size
+
+    def line(text, x0, x1):
+        return {"id": text, "text": text, "words": [], "ocrConfidence": 90.0,
+                "location": t.location(precise_box=[x0/width, 100/height, x1/width, 130/height], method="PADDLE_OCR")}
+    row = [line("0440357호", 200, 300), line("특", 20, 40), line("제", 120, 140), line("허", 70, 90),
+           line("탄력섬유재생!", 20, 300)]
+    row[-1]["location"] = t.location(precise_box=[20/width, 300/height, 300/width, 330/height], method="PADDLE_OCR")
+    [block] = ad_reading.certificate_blocks(t, row, [])
+    assert block["text"] == "특허 제 0440357 호" and patent_numbers(block["text"]) == ["10-0440357"]
+    assert block["location"]["bbox"][0] == pytest.approx(20 / width) and block["location"]["bbox"][2] == pytest.approx(300 / width)
+
+
+def test_a_bare_number_read_by_the_vision_does_not_hide_the_certificate_label():
+    t = tile()
+    width, height = t.source_size
+
+    def line(text, x0, x1):
+        return {"id": text, "text": text, "words": [], "ocrConfidence": 90.0,
+                "location": t.location(precise_box=[x0/width, 100/height, x1/width, 130/height], method="PADDLE_OCR")}
+    bare = {"text": "0440357 호", "role": "result", "segments": ["0440357 호"]}
+    [block] = ad_reading.certificate_blocks(t, [line("특", 20, 40), line("허 제", 70, 120), line("0440357호", 200, 300)], [bare])
+    assert block["text"] == "특허 제 0440357 호"
+    assert ad_reading.certificate_blocks(t, [line("특허 제 0440357 호", 20, 300)], [{"text": "특허 제 0440357 호"}]) == []

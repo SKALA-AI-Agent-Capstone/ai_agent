@@ -36,3 +36,9 @@ async def test_certificate_metadata_is_not_sent_to_rule_sweep():
     await sweep_findings(call, [block("2004년 07월 05일", 0) | {"documentContext": "patent_certificate"},
                                 block("볼륨 개선도 92.7%", 1)], [])
     assert seen == ["볼륨 개선도 92.7%"]
+
+
+def test_a_number_label_with_a_dropped_first_letter_is_still_a_patent_number():
+    assert patent_numbers("허 제 0440357 호") == ["10-0440357"]
+    assert patent_numbers("특 허 제 0440357 호") == ["10-0440357"]
+    assert patent_numbers("제 0440357 호") == []  # 제 ... 호 alone could be anything
