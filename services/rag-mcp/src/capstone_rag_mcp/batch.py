@@ -24,22 +24,9 @@ from .embedding import load_embedder
 from .ingest import embed_missing_all, from_lawapi, from_lawapi_statute, from_pdf, retire_replaced, write
 from .lawapi import LawApi
 from .curated import CuratedMismatch, curated_path, parse_curated_text, read_curated_pages
-from .pdf_vision import read_pages_for_index
+from .pdf_ocr import read_pages_with_ocr
 from .pdf_tables import s01_annex_rows
 from .links import rebuild_links
-
-# Model reading of image pages misses or misreads too much (S04: 58% of reviewed key phrases).
-# A PDF whose indexed pages are at least this share images is loaded only from reviewed MD.
-IMAGE_HEAVY_SHARE = 0.3
-
-
-class CuratedMdRequired(Exception):
-    """An image-heavy PDF has no reviewed MD that matches it, so it is left out of the index."""
-
-    def __init__(self, image_pages: list[int], total: int):
-        super().__init__("PDF_NEEDS_CURATED_MD")
-        self.image_pages, self.total = image_pages, total
-
 
 DOWNLOAD_HOSTS = {"www.mfds.go.kr", "mfds.go.kr", "kcia.or.kr", "www.kcia.or.kr", "www.law.go.kr", "law.go.kr"}
 MAX_PDF_BYTES = 32 * 1024 * 1024
@@ -146,10 +133,6 @@ async def collect_pdf() -> tuple[list, list[dict]]:
             page_warnings = []
             try:
                 pages, curated = read_source_pages(path, page_numbers, page_warnings.append)
-            except CuratedMdRequired as error:
-                page_warnings.append({"reason": str(error), "image_pages": error.image_pages,
-                                      "pages": error.total, "expected": f"data/curated/{source['id']}.md"})
-                continue
             finally:
                 skipped.extend({"id": source["id"], **warning} for warning in page_warnings)
             if acquisition["collection"] == "mixed_rules_cases":
@@ -163,9 +146,11 @@ async def collect_pdf() -> tuple[list, list[dict]]:
 
 
 def read_source_pages(path: Path, page_numbers: set[int] | None, on_warning) -> tuple[list[str], bool]:
-    """Prefer reviewed MD, then optional in-memory auto check, then basic PDF vision.
+    """Prefer reviewed MD; without one read the PDF itself, the same way ad and evidence files are read.
 
-    An image-heavy PDF without a matching MD raises CuratedMdRequired instead of being read by a model.
+    Pages with a text layer are read as they are. Pages without one go through PaddleOCR (Tesseract if it fails) and a
+    vision model compares the figures: a page where they differ is left out, and every OCR page is marked as machine
+    read (pdf_ocr). RAG_PDF_AUTO_VERIFY=true keeps the older model-written MD check in front of that, as an opt-in.
     """
     md_path = curated_path(path)
     if md_path.is_file():
@@ -181,11 +166,6 @@ def read_source_pages(path: Path, page_numbers: set[int] | None, on_warning) -> 
             return pages, True
         except CuratedMismatch as error:
             on_warning({"file": md_path.name, "reason": str(error), "fallback": "pdf"})
-    from .pdf_curator import image_page_numbers
-
-    image_pages, total = image_page_numbers(path, page_numbers)
-    if total and len(image_pages) / total >= IMAGE_HEAVY_SHARE:
-        raise CuratedMdRequired(image_pages, total)
     if os.getenv("RAG_PDF_AUTO_VERIFY", "false").lower() == "true":
         import pdfplumber
         from .pdf_curator import build_markdown
@@ -207,7 +187,9 @@ def read_source_pages(path: Path, page_numbers: set[int] | None, on_warning) -> 
                 on_warning({"page": page["page"], "reason": "AUTO_PDF_TEXT_PAGE_NOTE", "checks": page["reasons"]})
         on_warning(_trust_summary("auto_verify", trust, page_numbers, write_qa_report(path, report)))
         return pages, True
-    return read_pages_for_index(path, page_numbers=page_numbers, on_warning=on_warning), False
+    pages, trust = read_pages_with_ocr(path, page_numbers, on_warning)
+    on_warning(_trust_summary("ocr", trust, page_numbers, None))
+    return pages, False
 
 
 def _in_range(pages: list[str], page_numbers: set[int] | None) -> list[str]:

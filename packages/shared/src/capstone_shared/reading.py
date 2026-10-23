@@ -174,12 +174,13 @@ def _render(pdf_page, scale: float) -> Image.Image:
 def read_pdf(raw: bytes, *, max_pages: int = MAX_PAGES, prefer: str = "auto", ocr_budget_seconds: float | None = None,
              max_ocr_pages: int | None = None, scale: float = 2.0, ocr: OcrCall | None = None,
              crosscheck: CrossCheck | None = None, with_lines: bool = False, max_bytes: int | None = MAX_BYTES,
-             page_limit_error: str = "EVIDENCE_PAGE_LIMIT") -> ReadResult:
+             page_limit_error: str = "EVIDENCE_PAGE_LIMIT", only_pages: set[int] | None = None) -> ReadResult:
     """Read every page. ocr_budget_seconds and max_ocr_pages bound the OCR; pages left unread are listed.
 
     max_ocr_pages=0 reads the text layer only and still classifies every page (the RAG index and the ad reader send
     picture pages to a vision model themselves). with_lines adds each text-layer line with its box, for callers that
-    must point at where a phrase is."""
+    must point at where a phrase is. only_pages limits OCR to those page numbers (the RAG index reads only the page
+    ranges it indexes); other pages keep their text layer and are not reported as unread."""
     if max_bytes is not None and len(raw) > max_bytes:
         raise ValueError("FILE_TOO_LARGE")
     ocr = ocr or ocr_engine.read_image
@@ -196,14 +197,14 @@ def read_pdf(raw: bytes, *, max_pages: int = MAX_PAGES, prefer: str = "auto", oc
 
     try:
         return _read_pages(raw, max_pages, page_limit_error, with_lines, deadline, max_ocr_pages, ocr, prefer, scale,
-                           checker, visual)
+                           checker, visual, only_pages)
     finally:
         for document in rendered:
             document.close()
 
 
 def _read_pages(raw, max_pages, page_limit_error, with_lines, deadline, max_ocr_pages, ocr, prefer, scale, checker,
-                visual) -> ReadResult:
+                visual, only_pages) -> ReadResult:
     import pdfplumber  # looked up per call, so a caller's stand-in module is honoured
     pages: list[PageText] = []
     unread: list[int] = []
@@ -228,6 +229,9 @@ def _read_pages(raw, max_pages, page_limit_error, with_lines, deadline, max_ocr_
                 pages.append(item)
             if kind == "text":
                 add(PageText(number, kind, "text_layer", layer, None, notes))
+                continue
+            if only_pages is not None and number not in only_pages:
+                add(PageText(number, kind, "text_layer" if layer else "none", layer, None, notes))
                 continue
             over_budget = (deadline is not None and time.monotonic() > deadline) or \
                 (max_ocr_pages is not None and ocr_pages >= max_ocr_pages)
