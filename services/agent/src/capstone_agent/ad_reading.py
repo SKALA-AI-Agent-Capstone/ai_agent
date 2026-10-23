@@ -218,6 +218,7 @@ async def snap_to_ocr(tile: Tile, text: str, model_box: list[float]) -> list[dic
 def block(tile: Tile, key: str, group: Group, segments: list[str], text: str, hits: list[dict], engine="TESSERACT",
           check=None) -> dict:
     box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
+    text, segments = join_spaced(text), [join_spaced(x) for x in segments]
     out = {"id": f"{tile.id}:copy:{key}", "text": text, "segments": segments, "kind": group.kind,
            "role": ROLE_OF_KIND.get(group.kind, group.role), "labels": group.labels,
            "words": [w for line in hits for w in line.get("words", [])],
@@ -277,6 +278,15 @@ async def reread(provider, tile: Tile, hits: list[dict]) -> str:
     return join_spaced(" ".join(line.strip() for line in out.lines if line.strip()))
 
 
+def in_figure(text: str, at: int) -> bool:
+    """The character sits in a claim figure ('63.91%', '4배', '2주'), which is never changed from the OCR.
+    Digits of an identifier (application or patent number, date) may be."""
+    start = text.rfind(" ", 0, at) + 1
+    end = text.find(" ", at)
+    token = text[start:end if end >= 0 else len(text)]
+    return "%" in token or bool(re.search(r"\d\.\d", token)) or bool(re.search(r"\d\s*(배|주|일간|시간|분|회|명)", token))
+
+
 def ocr_letters(vision: str, ocr: str, limit: int = 2, partial: bool = False) -> str | None:
     """The vision text with a few of its letters replaced by the OCR's, its spacing kept. Only one-for-one letter
     swaps ('특허중' against '특허증'); no letter added or dropped, never a digit, so a figure is not touched.
@@ -295,7 +305,7 @@ def ocr_letters(vision: str, ocr: str, limit: int = 2, partial: bool = False) ->
             return None
         for k in range(i2 - i1):
             old, new = a[i1 + k], b[j1 + k]
-            if old.isdigit() or new.isdigit() or "%" in (old, new) or "." in (old, new):
+            if "%" in (old, new) or "." in (old, new) or ((old.isdigit() or new.isdigit()) and in_figure(vision, keep[i1 + k])):
                 return None
             out[keep[i1 + k]] = new
             swaps += 1
@@ -389,9 +399,14 @@ def same_row(lines: list[dict]) -> list[list[dict]]:
     return [sorted(row, key=lambda l: l["location"]["bbox"][0]) for row in rows]
 
 
-CERTIFICATE_FIELD = re.compile(r"특허증|특허\s*제|허\s*제\s*\d{7}|출원\s*번호|출원일|등록일|공개일|등록번호|특허청(?:장)?|"
-                               r"(?i:(?:commission(?:er)?\s+(?:of|on)?\s*the\s+)?korean\s+intellectual\s+property(?:\s+office)?)|"
-                               r"제\s*\d{4}-\d{7}\s*호|\d{7}\s*호|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일")
+# Fields of a document pictured in an ad (patent certificate, test report, registration): its title, labelled
+# numbers and dates, and the issuing office. A block made of these and nothing else is a certificate field.
+CERTIFICATE_TITLE = re.compile(r"특허증|인증서|등록증|시험\s*성적서|성적서|허가증|신고증|증명서|(?i:certificate)")
+CERTIFICATE_FIELD = re.compile(
+    r"특허증|인증서|등록증|시험\s*성적서|성적서|허가증|신고증|증명서|(?i:certificate(?:\s+of\s+\w+)?)|"
+    r"특허\s*제|허\s*제\s*\d{7}|(?:출원|등록|공개|인증|발급|허가|신고|성적서|시험|접수)\s*(?:번호|일자|일|기관)|"
+    r"특허청(?:장)?|식품의약품안전처(?:장)?|(?i:(?:commission(?:er)?\s+(?:of|on)?\s*the\s+)?korean\s+intellectual\s+property(?:\s+office)?)|"
+    r"제\s*[A-Za-z0-9-]{4,}\s*호|\d{7}\s*호|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}[.-]\d{1,2}[.-]\d{1,2}")
 
 
 def certificate_field(text: str) -> bool:
@@ -406,30 +421,39 @@ def merge_certificate(tile: Tile, blocks: list[dict], lines: list[dict] = ()) ->
     """When the vision read split one certificate into field blocks anyway, put them back into one unit, and give
     it back its title when the OCR saw '특허증' but the vision read dropped it (a short title is easy to skip)."""
     fields = [b for b in blocks if b.get("kind") == "certificate" or certificate_field(b["text"])]
-    if not any(re.search(r"특허증|특허\s*제|허\s*제", b["text"]) for b in fields):
+    if not any(CERTIFICATE_TITLE.search(b["text"]) or re.search(r"특허\s*제|허\s*제|제\s*[A-Za-z0-9-]{4,}\s*호", b["text"])
+               for b in fields):
         return blocks
-    titled = any("특허증" in norm(b["text"]) for b in fields)
+    titled = any(CERTIFICATE_TITLE.search(b["text"]) for b in fields)
     title_line = next((row for row in same_row([l for l in lines if l["location"].get("bbox")])
-                       if norm("".join(l["text"] for l in row)) == "특허증"), None)
+                       if CERTIFICATE_TITLE.fullmatch(norm("".join(l["text"] for l in row)))), None)
     if not titled and title_line:
         box = [min(l["location"]["bbox"][0] for l in title_line), min(l["location"]["bbox"][1] for l in title_line),
                max(l["location"]["bbox"][2] for l in title_line), max(l["location"]["bbox"][3] for l in title_line)]
-        fields.append({"id": f"{tile.id}:copy:certificate-title", "text": "특허증", "segments": ["특허증"], "kind": "certificate",
+        title = norm("".join(l["text"] for l in title_line))
+        fields.append({"id": f"{tile.id}:copy:certificate-title", "text": title, "segments": [title], "kind": "certificate",
                        "role": "condition", "labels": [], "words": [], "location": tile.location(precise_box=box, method="PADDLE_OCR")})
     if len(fields) < 2:
         return blocks
+    # A field the recall pass or another read repeated ('특허증 0440357 호' next to the full certificate) adds nothing.
+    def covered(f):
+        others = norm(" ".join(o["text"] for o in fields if o is not f))
+        return all(norm(token) in others for token in join_spaced(f["text"]).split() if norm(token))
+    candidates = list(fields)
+    fields = [f for f in fields if not covered(f)] or fields[:1]
     fields.sort(key=lambda b: ((b["location"].get("bbox") or b["location"]["region"])[1]))
-    segments = [s for b in fields for s in b["segments"]]
+    segments = [join_spaced(s) for b in fields for s in b["segments"]]
     boxes = [b["location"]["bbox"] for b in fields if b["location"].get("bbox")]
     box = [min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes)] if boxes else None
     merged = {**fields[0], "id": f"{tile.id}:copy:certificate", "text": " ".join(segments), "segments": segments,
-              "kind": "certificate", "role": "condition", "documentContext": "patent_certificate",
+              "kind": "certificate", "role": "condition",
+              "documentContext": "patent_certificate" if any("특허" in seg for seg in segments) else "certificate",
               "words": [w for b in fields for w in b.get("words", [])],
               "location": tile.location(precise_box=box, method=fields[0]["location"].get("coordinateSource", "PADDLE_OCR"))}
     merged.pop("readCheck", None)
-    present = [b for b in fields if b in blocks]
+    present = [b for b in candidates if b in blocks]
     first = blocks.index(min(present, key=blocks.index)) if present else 0
-    out = [b for b in blocks if b not in fields]
+    out = [b for b in blocks if b not in candidates]
     out.insert(min(first, len(out)), merged)
     return out
 

@@ -318,6 +318,7 @@ def test_letters_spread_out_by_design_are_joined_into_the_word():
 def test_ocr_letters_swap_letters_only_never_figures():
     assert ad_reading.ocr_letters("특 허 중", "특허증") == "특 허 증"
     assert ad_reading.ocr_letters("탄성 복원 68.91% 개선", "탄성 복원 63.91% 개선") is None
+    assert ad_reading.ocr_letters("출원번호 제 2001-0068893 호", "제2001-0065893 호", partial=True) == "출원번호 제 2001-0065893 호"  # an identifier
     assert ad_reading.ocr_letters("팔자 주름 9.83% 개선", "3 팔자 주름 9.83% 개선") is None  # nothing to swap
     assert ad_reading.ocr_letters("화장품 책임판매업자", "책임판매업자") is None  # a dropped word is not a swap
 
@@ -388,3 +389,23 @@ def test_the_issuing_office_under_a_certificate_is_part_of_it():
     assert ad_reading.certificate_field("특허청 COMMERCIALIZATION OF KOREAN INTELLECTUAL PROPERTY")
     assert ad_reading.certificate_field("COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY")
     assert not ad_reading.certificate_field("볼꺼짐 탄력섬유재생!")
+
+
+def test_fields_of_other_pictured_documents_are_recognised_too():
+    assert ad_reading.certificate_field("시험성적서")
+    assert ad_reading.certificate_field("발급일 2020년 3월 2일")
+    assert ad_reading.certificate_field("성적서 번호 제 AB-1234 호")
+    assert not ad_reading.certificate_field("시험기관 : (주)마리디엠 시험기간 : 25.03.14")  # a footnote, not a field
+    assert not ad_reading.certificate_field("*편강 레드 진생 프로폴리스 3종 시리즈에 대한 인체피부 개선효과 평가시험")
+
+
+def test_a_repeated_certificate_field_is_not_merged_twice():
+    t = tile()
+    width, height = t.source_size
+
+    def b(text, y):
+        return {"id": text, "text": text, "segments": [text], "kind": "certificate", "role": "condition", "labels": [], "words": [],
+                "location": t.location(precise_box=[20/width, y/height, 300/width, (y+20)/height], method="PADDLE_OCR")}
+    [merged] = ad_reading.merge_certificate(t, [b("특 허 증 0440357 호", 10), b("특허증 특허 제 0440357 호 출원일 2001년 10월 25일", 40),
+                                                b("특허청", 300), b("특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE", 310)])
+    assert merged["text"] == "특허증 특허 제 0440357 호 출원일 2001년 10월 25일 특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE"
