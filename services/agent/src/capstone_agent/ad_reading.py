@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from capstone_shared.documents import Tile, local_ocr
 from .instructions import instruction
 from . import paddle_ocr
+from .patent_certificate import CERTIFICATE_NUMBER
 
 
 # Tesseract is CPU bound. Every section reads at two sizes, so unbounded threads time out under load.
@@ -311,6 +312,45 @@ async def ocr_lines(tile: Tile) -> tuple[list[dict], list[str], str]:
     return lines, warnings, "TESSERACT"
 
 
+def same_row(lines: list[dict]) -> list[list[dict]]:
+    """OCR lines grouped by row, left to right. Widely spaced letters ('특 허 제 0440357 호') come back from
+    PaddleOCR as separate one-letter lines, so a label and its number only meet once the row is put together."""
+    rows: list[list[dict]] = []
+    for line in sorted(lines, key=lambda l: (l["location"]["bbox"][1] + l["location"]["bbox"][3]) / 2):
+        box = line["location"]["bbox"]
+        middle = (box[1] + box[3]) / 2
+        for row in rows:
+            first = row[0]["location"]["bbox"]
+            if first[1] <= middle <= first[3]:
+                row.append(line)
+                break
+        else:
+            rows.append([line])
+    return [sorted(row, key=lambda l: l["location"]["bbox"][0]) for row in rows]
+
+
+def certificate_blocks(tile: Tile, lines: list[dict], blocks: list[dict]) -> list[dict]:
+    """A patent number printed in the image reaches the patent lookup even when the vision read left the
+    certificate out (it may treat the certificate as a picture, not as ad copy). The block carries the OCR
+    wording as it stands and is context, never a claim to review."""
+    # A number the vision read already kept together with its label needs no second copy. A bare '0440357 호'
+    # does not count: without '특허 제' it is not recognised as a patent number downstream.
+    have = norm(" ".join(b["text"] for b in blocks if CERTIFICATE_NUMBER.search(b["text"])))
+    found = []
+    for row in same_row([l for l in lines if l["location"].get("bbox")]):
+        joined = " ".join(l["text"] for l in row)
+        for body in CERTIFICATE_NUMBER.findall(joined):
+            if body in have or any(body in norm(f["text"]) for f in found):
+                continue
+            box = [min(l["location"]["bbox"][0] for l in row), min(l["location"]["bbox"][1] for l in row),
+                   max(l["location"]["bbox"][2] for l in row), max(l["location"]["bbox"][3] for l in row)]
+            found.append({"id": f"{tile.id}:copy:cert{len(found)}", "text": f"특허 제 {body} 호",
+                          "segments": [f"특허 제 {body} 호"], "role": "condition", "labels": [],
+                          "words": [w for l in row for w in l.get("words", [])], "documentContext": "patent_certificate",
+                          "location": tile.location(precise_box=box, method=row[0]["location"].get("coordinateSource", "PADDLE_OCR"))})
+    return found
+
+
 async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
     """One section -> (blocks, warnings). Raises only when both Tesseract and the model are unavailable."""
     lines, warnings, engine = await ocr_lines(tile)
@@ -348,4 +388,4 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
                     blocks.append(block(tile, f"r{n}", group, segments, text, hits, engine))
         except Exception:
             warnings.append(f"{tile.id}:RECALL_PASS_FAILED")
-    return blocks, warnings
+    return blocks + certificate_blocks(tile, lines, blocks), warnings

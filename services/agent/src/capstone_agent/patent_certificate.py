@@ -2,7 +2,8 @@
 import re
 
 
-CERTIFICATE_NUMBER = re.compile(r"특\s*허\s*제\s*(\d{7})\s*호")
+# OCR often drops the first letter of the spaced-out "특 허 제" label, so 특 is optional.
+CERTIFICATE_NUMBER = re.compile(r"(?:특\s*)?허\s*제\s*(\d{7})\s*호")
 STANDARD_NUMBER = re.compile(r"\b10[-– ]\d{7}\b")
 DATE_VALUE = re.compile(r"\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*[일%]?")
 LABELS = ("출원번호", "출원일", "등록일", "공개일")
