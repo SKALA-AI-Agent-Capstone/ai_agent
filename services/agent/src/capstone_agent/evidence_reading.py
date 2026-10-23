@@ -11,8 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from capstone_shared.evidence_parse import parse_evidence
 from capstone_shared.settings import internal_token, required_env
 
+from .evidence_vlm import make_crosscheck
+
 PARSE_TIMEOUT_SECONDS = 280
-OCR_BUDGET_SECONDS = 240
+OCR_BUDGET_SECONDS = 170
 MAX_OCR_PAGES = 40
 
 
@@ -30,8 +32,10 @@ async def fetch_evidence(evidence_id: str) -> bytes:
         return response.content
 
 
-async def parse_stored_evidence(request: EvidenceParseRequest) -> dict:
+async def parse_stored_evidence(request: EvidenceParseRequest, provider=None) -> dict:
     raw = await fetch_evidence(request.evidenceId)
+    crosscheck = make_crosscheck(provider, asyncio.get_running_loop())
     async with asyncio.timeout(PARSE_TIMEOUT_SECONDS):
         return await asyncio.to_thread(parse_evidence, raw, request.productName,
-                                       ocr_budget_seconds=OCR_BUDGET_SECONDS, max_ocr_pages=MAX_OCR_PAGES)
+                                       ocr_budget_seconds=OCR_BUDGET_SECONDS, max_ocr_pages=MAX_OCR_PAGES,
+                                       crosscheck=crosscheck)

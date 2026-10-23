@@ -160,7 +160,7 @@ def create_app() -> FastAPI:
     @app.post("/internal/evidence/parse", dependencies=[Depends(require_internal)])
     async def parse_evidence_file(request: EvidenceParseRequest) -> dict:
         try:
-            return await parse_stored_evidence(request)
+            return await parse_stored_evidence(request, Provider())
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error) or "EVIDENCE_UNREADABLE") from None
         except httpx.HTTPStatusError:

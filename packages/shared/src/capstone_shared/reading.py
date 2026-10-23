@@ -8,6 +8,10 @@ Per page, by what the page holds:
   layered_scan  one picture of a page with a text layer on top (a scanner's own OCR)
                                                       -> OCR too; the layer is kept only if the two agree
 
+A page read by OCR can also be cross-checked by a second reader (a vision model, passed in as `crosscheck`): it says
+whether the two agree on the figures, and a page where they differ is listed in check_pages for a person to look at.
+The cross-check never replaces the OCR text; it only marks the page.
+
 Every page records how it was read, so a result can be trusted or re-read by what produced it. READER_VERSION
 changes whenever a threshold or an engine changes; stored results carry it, and a different version means the
 file is read again.
@@ -52,6 +56,7 @@ class PageText:
     text: str
     confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
+    check: dict | None = None   # second reader's verdict: {"status": match | needs_review | skipped | unavailable, ...}
 
     @property
     def chars(self) -> int:
@@ -65,6 +70,7 @@ class ReadResult:
     reader_version: str = READER_VERSION
     warnings: list[str] = field(default_factory=list)
     unread_pages: list[int] = field(default_factory=list)
+    check_pages: list[int] = field(default_factory=list)  # OCR pages where the second reader disagreed
 
     @property
     def methods(self) -> list[str]:
@@ -75,6 +81,36 @@ class ReadResult:
 
 
 OcrCall = Callable[[Image.Image, str], ocr_engine.OcrOutput]
+CrossCheck = Callable[[Image.Image, str], dict]   # (page image, OCR text) -> verdict; may raise
+CHECK_MAX_PAGES = 30
+CHECK_BUDGET_SECONDS = 200
+
+
+class Checker:
+    """Runs the cross-check on OCR pages within a page and time budget, and never lets it break the read."""
+
+    def __init__(self, crosscheck: CrossCheck | None, max_pages: int | None = None, budget_seconds: float | None = None):
+        self.crosscheck, self.checked = crosscheck, 0
+        self.max_pages = CHECK_MAX_PAGES if max_pages is None else max_pages
+        self.deadline = time.monotonic() + (CHECK_BUDGET_SECONDS if budget_seconds is None else budget_seconds)
+
+    def run(self, page: "PageText", image: Image.Image, ocr_text: str) -> None:
+        if self.crosscheck is None:
+            return
+        if self.checked >= self.max_pages or time.monotonic() > self.deadline:
+            page.check = {"status": "skipped"}
+            page.warnings.append("VLM_CHECK_SKIPPED")
+            return
+        self.checked += 1
+        try:
+            verdict = self.crosscheck(image, ocr_text)
+        except Exception:
+            page.check = {"status": "unavailable"}
+            page.warnings.append("VLM_CHECK_FAILED")
+            return
+        page.check = verdict
+        if verdict.get("status") == "needs_review":
+            page.warnings.append("OCR_VLM_MISMATCH")
 
 
 def classify_page(text: str, image_ratio: float) -> str:
@@ -121,11 +157,13 @@ def _render(pdf_page, scale: float) -> Image.Image:
 
 
 def read_pdf(raw: bytes, *, max_pages: int = MAX_PAGES, prefer: str = "auto", ocr_budget_seconds: float | None = None,
-             max_ocr_pages: int | None = None, scale: float = 2.0, ocr: OcrCall | None = None) -> ReadResult:
+             max_ocr_pages: int | None = None, scale: float = 2.0, ocr: OcrCall | None = None,
+             crosscheck: CrossCheck | None = None) -> ReadResult:
     """Read every page. ocr_budget_seconds and max_ocr_pages bound the OCR; pages left unread are listed."""
     if len(raw) > MAX_BYTES:
         raise ValueError("FILE_TOO_LARGE")
     ocr = ocr or ocr_engine.read_image
+    checker = Checker(crosscheck)
     deadline = time.monotonic() + ocr_budget_seconds if ocr_budget_seconds else None
     pages: list[PageText] = []
     unread: list[int] = []
@@ -176,12 +214,15 @@ def read_pdf(raw: bytes, *, max_pages: int = MAX_PAGES, prefer: str = "auto", oc
                                       output.confidence, notes))
             if not pages[-1].text.strip():
                 unread.append(number)
+            checker.run(pages[-1], image, output.text)
     if unread:
         warnings.append("UNREAD_PAGES:" + ",".join(str(n) for n in unread))
-    return ReadResult(pages, count, READER_VERSION, warnings, unread)
+    return ReadResult(pages, count, READER_VERSION, warnings, unread,
+                      [page.number for page in pages if page.check and page.check.get("status") == "needs_review"])
 
 
-def read_image_file(raw: bytes, *, prefer: str = "auto", ocr: OcrCall | None = None) -> ReadResult:
+def read_image_file(raw: bytes, *, prefer: str = "auto", ocr: OcrCall | None = None,
+                    crosscheck: CrossCheck | None = None) -> ReadResult:
     if len(raw) > MAX_BYTES:
         raise ValueError("FILE_TOO_LARGE")
     try:
@@ -197,8 +238,10 @@ def read_image_file(raw: bytes, *, prefer: str = "auto", ocr: OcrCall | None = N
                           ["UNREAD_PAGES:1"], [1])
     notes = ["PADDLE_FAILED_TESSERACT_USED"] if output.fell_back else []
     page = PageText(1, "scan", output.engine, output.text, output.confidence, notes)
+    Checker(crosscheck).run(page, image.convert("RGB"), output.text)
     return ReadResult([page], 1, READER_VERSION, [] if page.text.strip() else ["UNREAD_PAGES:1"],
-                      [] if page.text.strip() else [1])
+                      [] if page.text.strip() else [1],
+                      [1] if page.check and page.check.get("status") == "needs_review" else [])
 
 
 def read_document(raw: bytes, **options) -> ReadResult:
