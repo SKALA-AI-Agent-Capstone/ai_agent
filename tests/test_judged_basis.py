@@ -58,9 +58,9 @@ class Model:
         self.seen.append((schema.__name__, kwargs["text"]))
         if schema is ClaimJudgments:
             return ClaimJudgments(judgments=[
-                {"id": "f1", "problem": True, "claimType": "clinical", "span": "임상으로 입증", "purpose": "시험 결과 표시의 실증 요건",
+                {"id": "f1", "factType": "test", "factWords": "개선", "problem": True, "claimType": "clinical", "span": "임상으로 입증", "purpose": "시험 결과 표시의 실증 요건",
                  "reason": "임상 결과를 효능 근거로 내세움"},
-                {"id": "rule-1", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "",
+                {"id": "rule-1", "factType": "none", "factWords": "", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "",
                  "reason": "3중은 오일 구성 설명이고 효능 주장이 아님"}])
         assert schema is BasisCheck
         return BasisCheck(verdicts=self.verdicts.pop(0))
@@ -165,9 +165,9 @@ async def test_claims_of_one_section_and_type_share_one_tool_loop_but_are_verifi
             self.seen.append((schema.__name__, kwargs["text"]))
             if schema is ClaimJudgments:
                 return ClaimJudgments(judgments=[
-                    {"id": fid, "problem": True, "claimType": "clinical", "span": "", "purpose": "수치 실증", "reason": "수치"}
+                    {"id": fid, "factType": "figure", "factWords": "%", "problem": True, "claimType": "clinical", "span": "", "purpose": "수치 실증", "reason": "수치"}
                     for fid in ("f1", "f2")] + [  # the fake rule sweep line is not a concern
-                    {"id": "rule-1", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "", "reason": "-"}])
+                    {"id": "rule-1", "factType": "none", "factWords": "", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "", "reason": "-"}])
             return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
 
     model = Judge([])
@@ -190,10 +190,18 @@ async def test_every_figure_row_is_a_card_even_when_extraction_skips_it_or_the_j
             self.seen.append((schema.__name__, kwargs["text"]))
             if schema is ClaimJudgments:
                 return ClaimJudgments(judgments=[
-                    {"id": "f1", "problem": True, "claimType": "clinical", "span": "4.5%", "purpose": "실증", "reason": "수치"},
-                    {"id": "row-r2", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "", "reason": "기능성 아님"}])
+                    {"id": "f1", "factType": "figure", "factWords": "4.5%", "problem": True, "claimType": "clinical", "span": "4.5%", "purpose": "실증", "reason": "수치"},
+                    {"id": "row-r2", "factType": "figure", "factWords": "12.3%", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "", "reason": "기능성 아님"}])
             return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
 
     out = await judged_basis([finding("f1", "탄성 4.5% 개선", "r1")], Judge([]), texts=texts, section_texts=texts, call=rag)
     assert sorted(f["textId"] for f in out["findings"]) == ["r1", "r2", "r3"]  # r2 kept despite the judge, r3 added
     assert out["dismissed"] == []
+
+
+def test_a_judgment_without_checkable_words_in_the_phrase_is_not_a_card():
+    f = finding("f1", "눈부시게 빛나는 피부", "t1", "exaggeration")
+    base = {"id": "f1", "problem": True, "claimType": "exaggeration", "span": "", "purpose": "-", "reason": "-"}
+    assert not jb.grounded(jb.Judgment(**base, factType="none", factWords=""), f, {}).problem
+    assert not jb.grounded(jb.Judgment(**base, factType="medical", factWords="세포 재생"), f, {}).problem  # not written
+    assert jb.grounded(jb.Judgment(**base, factType="superlative", factWords="눈부시게"), f, {}).problem

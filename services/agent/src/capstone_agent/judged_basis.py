@@ -35,11 +35,19 @@ MAX_SAME_BASIS_TOOL = 2
 BASIS_LOOP_SECONDS = 45
 MAX_VERIFIED_BASIS = 2
 JUDGE_BATCH = 10
+JUDGE_REASONING = "low"
 CANDIDATE_TEXT = 1200
+
+
+FactType = Literal["figure", "test", "authority", "medical", "functional", "superlative", "property", "none"]
 
 
 class Judgment(BaseModel):
     id: str
+    # What in the wording a reviewer could check against a document, quoted from the phrase. Asked before problem
+    # so the decision rests on words that are there, not on how strongly the phrase sounds.
+    factType: FactType
+    factWords: str
     problem: bool
     claimType: ClaimType
     span: str
@@ -107,13 +115,34 @@ async def judge(provider, findings: list[dict], texts_by_id: dict, sections: dic
         return "; ".join(f"({ROLE_NAMES.get(t.get('role'), '문구')}) {t['text'][:60]}" for t in near) or "(없음)"
     def listing(part):
         return "\n".join(f"[{f['id']}] 문구: {f['phrase']}\n줄 전체: {line_of(f, texts_by_id)}\n같은 구간: {context(f)}"
-                         f"\n1차 메모: {f.get('reason', '')}" for f in part)
+                         f"\n1차 메모(참고만): {f.get('reason', '')}" for f in part)
     # Judged in small batches: one long listing was cut at the input budget and the cut candidates went through
     # unjudged, so nothing was ever dismissed.
     parts = [findings[i:i + JUDGE_BATCH] for i in range(0, len(findings), JUDGE_BATCH)]
-    outputs = await asyncio.gather(*(provider.parse(instruction("claim_judgment"), ClaimJudgments, text=listing(part))
-                                     for part in parts))
-    return {j.id: j for output in outputs for j in output.judgments}
+    # Judged with reasoning: without it the model took strong wording for a factual claim. On the cards of five ads
+    # (2026-10-23), 44 stating nothing checkable: kept 27 without reasoning, 4 with low effort, 6 with medium at
+    # almost five times the time.
+    outputs = await asyncio.gather(*(provider.parse(instruction("claim_judgment"), ClaimJudgments, text=listing(part),
+                                                    reasoning=JUDGE_REASONING) for part in parts))
+    by_id = {f["id"]: f for f in findings}
+    return {j.id: grounded(j, by_id.get(j.id), texts_by_id) for output in outputs for j in output.judgments}
+
+
+def letters(text: str) -> str:
+    """Letters, digits, % and . only: the quoted words are compared without spacing or punctuation."""
+    return re.sub(r"[^0-9A-Za-z가-힣%.]", "", text or "").lower()
+
+
+def grounded(judgment: Judgment, finding: dict | None, texts_by_id: dict) -> Judgment:
+    """A card needs something checkable written in the phrase. With no fact type, or quoted words that are not in
+    the phrase or its line, there is nothing for the reviewer to compare, however strong the wording sounds."""
+    if not judgment.problem or finding is None:
+        return judgment
+    words = letters(judgment.factWords)
+    written = letters(finding["phrase"]) + "\n" + letters(line_of(finding, texts_by_id))
+    if judgment.factType != "none" and words and words in written:
+        return judgment
+    return judgment.model_copy(update={"problem": False, "reason": "문구에 자료로 확인할 수치, 시험, 공적 근거, 효능 단정이 쓰여 있지 않습니다."})
 
 
 def span_box(span: str, block: dict | None):
@@ -397,8 +426,10 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
         kept, dismissed, seen = [], [], {}
         for finding in candidates:
             judgment = judgments.get(finding["id"])
-            if judgment is not None and not judgment.problem and is_figure_row(texts_by_id.get(finding.get("textId"))):
-                # The judge may not wave a figure row through: its figure still needs substantiation.
+            if judgment is not None and not judgment.problem and judgment.factType == "figure" \
+                    and is_figure_row(texts_by_id.get(finding.get("textId"))):
+                # The judge may not wave a figure through on a list row: the figure still needs substantiation.
+                # A row it finds no figure in (a scale legend, a pack count, an ingredient list) may go.
                 judgment = judgment.model_copy(update={"problem": True, "claimType": "clinical",
                                                        "purpose": judgment.purpose or "수치로 표시한 효능의 실증 자료",
                                                        "reason": "수치로 효능을 표시해 실증 자료가 필요합니다."})

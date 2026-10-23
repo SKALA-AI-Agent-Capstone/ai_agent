@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from capstone_shared.documents import prepare_document, Tile
 from capstone_shared.settings import internal_token, required_env
 from .observability import traced_client
-from .checks import cross_checks, resolved_by_evidence
+from .checks import cross_checks, patent_record_cards, resolved_by_evidence
 from .ad_reading import read_tile
 from .evidence import summarize, match as match_evidence
 from .instructions import instruction
@@ -83,6 +83,9 @@ logger = logging.getLogger(__name__)
 RETRYABLE_MODEL_ERRORS = (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError)
 
 
+REASONING_HEADROOM = 12000
+
+
 class Provider:
     """Model calls for every node. The SDK retries 429, 5xx and connection errors with backoff
     (MODEL_MAX_RETRIES, default 2). If the call still fails and FALLBACK_TEXT_MODEL or FALLBACK_VISION_MODEL
@@ -97,7 +100,9 @@ class Provider:
         if self.client:
             self.client = traced_client(self.client)
 
-    async def parse(self, prompt, schema, *, image=None, text=""):
+    async def parse(self, prompt, schema, *, image=None, text="", reasoning=None):
+        """reasoning ("low", "medium") lets the model think before answering; its thinking counts against the
+        output cap, so the cap grows by REASONING_HEADROOM. Used where a judgment, not a transcription, is asked."""
         if not self.client:
             raise RuntimeError("OPENAI_NOT_CONFIGURED")
         bounded, output_cap, compacted = prepare_parse(
@@ -109,6 +114,9 @@ class Provider:
         content += [{"type":"input_image", "image_url":url, "detail":"high"} for url in images]
         request = {"input":[{"role":"system", "content":prompt}, {"role":"user", "content":content}],
                    "text_format":schema, "store":False, "max_output_tokens":output_cap}
+        if reasoning:
+            request["reasoning"] = {"effort": reasoning}
+            request["max_output_tokens"] = output_cap + REASONING_HEADROOM
         async with self.limit:
             response = await self._with_fallback("VISION" if image else "TEXT",
                                                  lambda model: self.client.responses.parse(model=model, **request))
@@ -734,7 +742,8 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
                 evidence["claimMatches"] = [{"findingId": k, **v} for k, v in matches.items()]
             except Exception:
                 warnings.append("EVIDENCE_MATCH_FAILED")
-        out = await cross_checks(result["findings"], product=state["product"], evidence=evidence,
+        cards = result["findings"] + patent_record_cards(result["findings"], state["texts"], result.get("patents"))
+        out = await cross_checks(cards, product=state["product"], evidence=evidence,
                                  evidence_count=evidence_count, ad_text="\n".join(t["text"] for t in state["texts"]),
                                  provider=provider, review_date=datetime.now(timezone.utc).date().isoformat(),
                                  matches=matches, patents=result.get("patents"))

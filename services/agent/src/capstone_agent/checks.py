@@ -183,6 +183,28 @@ def resolved_by_evidence(findings: list[dict]) -> tuple[list[dict], list[dict]]:
     return kept, resolved
 
 
+def patent_record_cards(findings: list[dict], texts: list[dict], patents: list[dict] | None) -> list[dict]:
+    """A pictured patent certificate whose patent KIPRIS lists as lapsed is a claim in itself: the ad shows a right
+    it no longer has. When no card speaks of the patent yet, the certificate becomes one, so the lapse is shown."""
+    if any(f.get("claimType") == "patent" for f in findings):
+        return []
+    lapsed = [p.get("number") for p in patents or [] if isinstance(p, dict) and p.get("status") == "expired"]
+    cards = []
+    for number in lapsed:
+        digits = number.split("-")[-1] if number else ""
+        block = next((t for t in texts if digits and digits in t.get("text", "").replace(" ", "")), None)
+        if block is None:
+            continue
+        cards.append({"id": f"patent-{number}", "phrase": block["text"][:120], "start": 0, "end": min(len(block["text"]), 120),
+                      "location": block["location"], "textId": block["id"], "tileId": (block.get("location") or {}).get("tileId"),
+                      "severity": "low", "baseSeverity": "low",
+                      "claimType": "patent", "reason": "광고에 실린 특허증의 특허를 KIPRIS에서 조회한 결과입니다.",
+                      "title": "공식 기록과 대조한 특허", "basis": [], "baseBasis": [], "confidence": None, "rewrites": [],
+                      "references": [], "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None,
+                      "requiredChecks": ["patent"], "source": "patent_record"})
+    return cards
+
+
 def patent_check(numbers: list[str], patents: list[dict] | None) -> dict:
     """Patent claim vs the KIPRIS register status of the numbers printed in the ad."""
     if not numbers:
