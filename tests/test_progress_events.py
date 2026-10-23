@@ -34,6 +34,16 @@ async def test_business_tools_emit_start_and_finish_with_adapter_failures(monkey
     ]
 
 
+def test_tool_success_ignores_an_empty_error_field():
+    # Real adapter results always carry "error"; None means the call worked.
+    assert engine.tool_succeeded({"status": "not_found", "error": None, "data": None})
+    assert engine.tool_succeeded({"status": "found", "error": None})
+    assert engine.tool_succeeded([{"status": "registered", "error": None}, {"status": "needs_confirm", "error": None}])
+    assert not engine.tool_succeeded({"status": "error", "error": "API_NOT_CONFIGURED"})
+    assert not engine.tool_succeeded({"status": "not_found", "error": "PROVIDER_REQUEST_FAILED"})
+    assert not engine.tool_succeeded([{"status": "registered", "error": None}, {"status": "api_error"}])
+
+
 @pytest.mark.asyncio
 async def test_progress_is_a_step_done_event_and_never_raises(monkeypatch):
     sent = []

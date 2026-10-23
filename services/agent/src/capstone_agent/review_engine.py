@@ -463,13 +463,15 @@ BUSINESS_TOOL_SPECS = [
 
 
 def tool_succeeded(output):
-    """For the progress event only: an adapter error inside a result (api_error, not configured) is a failure."""
+    """For the progress event only: an adapter error inside a result (api_error, not configured) is a failure.
+    Adapter results always carry an "error" key, so only a non-empty value counts. A lookup that found
+    nothing (not_found) or needs confirmation is a successful call, not a failure."""
     items = output if isinstance(output, list) else [output]
     for item in items:
         if not isinstance(item, dict):
             continue
         status = str(item.get("status", "")).lower()
-        if "error" in item or status in ("api_error", "api_not_configured", "error"):
+        if item.get("error") or status in ("api_error", "api_not_configured", "error"):
             return False
     return True
 
