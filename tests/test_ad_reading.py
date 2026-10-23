@@ -308,13 +308,6 @@ def test_a_bare_number_read_by_the_vision_does_not_hide_the_certificate_label():
     assert ad_reading.certificate_blocks(t, [line("특허 제 0440357 호", 20, 300)], [{"text": "특허 제 0440357 호"}]) == []
 
 
-def test_letters_spread_out_by_design_are_joined_into_the_word():
-    assert ad_reading.join_spaced("특 허 증") == "특허증"
-    assert ad_reading.join_spaced("특  허\u00a0청") == "특허청"
-    assert ad_reading.join_spaced("출 원 일 2001년 10월 25일") == "출원일 2001년 10월 25일"
-    assert ad_reading.join_spaced("눈가 주름 12.08% 개선") == "눈가 주름 12.08% 개선"
-
-
 def test_ocr_letters_swap_letters_only_never_figures():
     assert ad_reading.ocr_letters("특 허 중", "특허증") == "특 허 증"
     assert ad_reading.ocr_letters("탄성 복원 68.91% 개선", "탄성 복원 63.91% 개선") is None
@@ -334,7 +327,7 @@ async def test_a_certificate_is_one_context_unit_and_its_number_reaches_the_pate
         async def parse(self, prompt, schema, **kwargs):
             return AdCopy(layout=["특허증", "광고 제목"], on_product_text=[], groups=[
                 {"kind": "certificate", "role": "claim", "labels": [], "box_numbers": [], "box": [],
-                 "segments": ["특 허 증", "특허 제 0440357 호", "출원번호 제 2001-0065893 호", "출원일 2001년 10월 25일", "등록일 2004년 07월 05일"]},
+                 "segments": ["특허증", "특허 제 0440357 호", "출원번호 제 2001-0065893 호", "출원일 2001년 10월 25일", "등록일 2004년 07월 05일"]},
                 {"kind": "copy", "role": "claim", "segments": ["볼꺼짐 탄력섬유재생!"], "labels": [], "box_numbers": [], "box": []}])
 
     blocks, _ = await read_tile(Provider(), t)
@@ -345,58 +338,9 @@ async def test_a_certificate_is_one_context_unit_and_its_number_reaches_the_pate
     assert patent_numbers(certificate["text"]) == ["10-0440357"]
 
 
-async def test_a_certificate_split_into_field_blocks_is_put_back_together(monkeypatch):
-    t = tile()
-    monkeypatch.setattr(ad_reading, "local_ocr", tesseract_lines)
-
-    class Provider:
-        client = True
-
-        async def parse(self, prompt, schema, **kwargs):
-            def g(kind, text):
-                return {"kind": kind, "role": "claim", "segments": [text], "labels": [], "box_numbers": [], "box": []}
-            return AdCopy(layout=[], on_product_text=[], groups=[
-                g("copy", "특허증"), g("copy", "볼꺼짐 탄력섬유재생!"), g("footnote", "특허 제 0440357 호"),
-                g("footnote", "출원번호 제 2001-0065893 호"), g("footnote", "출원일 2001년 10월 25일")])
-
-    blocks, _ = await read_tile(Provider(), t)
-    assert [b["text"] for b in blocks] == ["특허증 특허 제 0440357 호 출원번호 제 2001-0065893 호 출원일 2001년 10월 25일",
-                                          "볼꺼짐 탄력섬유재생!"]
-    assert blocks[0]["kind"] == "certificate" and blocks[0]["documentContext"] == "patent_certificate"
-
-
 def test_a_confident_line_corrects_its_own_part_of_the_group():
     fixed = ad_reading.ocr_letters("임상으로 검증된 7종 피부 노화 정후 개선 효과", "7종피부노화징후", partial=True)
     assert fixed == "임상으로 검증된 7종 피부 노화 징후 개선 효과"
-
-
-def test_a_certificate_gets_back_the_title_the_vision_read_dropped():
-    t = tile()
-    width, height = t.source_size
-    loc = t.location(precise_box=[20/width, 200/height, 300/width, 230/height], method="PADDLE_OCR")
-    cert = {"id": "c", "text": "특허 제 0440357 호 출원일 2001년 10월 25일", "segments": ["특허 제 0440357 호", "출원일 2001년 10월 25일"],
-            "kind": "certificate", "role": "condition", "labels": [], "words": [], "location": loc}
-    title = [{"id": x, "text": x, "words": [], "location": t.location(precise_box=[x0/width, 100/height, (x0+20)/width, 130/height], method="PADDLE_OCR")}
-             for x, x0 in (("특", 20), ("허", 60), ("증", 100))]
-    [merged] = ad_reading.merge_certificate(t, [cert], title)
-    assert merged["segments"][0] == "특허증" and merged["text"].startswith("특허증 특허 제 0440357 호")
-
-
-def test_the_issuing_office_under_a_certificate_is_part_of_it():
-    assert ad_reading.certificate_field("특허청")
-    assert ad_reading.certificate_field("특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE")
-    assert ad_reading.certificate_field("특 허 청")
-    assert ad_reading.certificate_field("특허청 COMMERCIALIZATION OF KOREAN INTELLECTUAL PROPERTY")
-    assert ad_reading.certificate_field("COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY")
-    assert not ad_reading.certificate_field("볼꺼짐 탄력섬유재생!")
-
-
-def test_fields_of_other_pictured_documents_are_recognised_too():
-    assert ad_reading.certificate_field("시험성적서")
-    assert ad_reading.certificate_field("발급일 2020년 3월 2일")
-    assert ad_reading.certificate_field("성적서 번호 제 AB-1234 호")
-    assert not ad_reading.certificate_field("시험기관 : (주)마리디엠 시험기간 : 25.03.14")  # a footnote, not a field
-    assert not ad_reading.certificate_field("*편강 레드 진생 프로폴리스 3종 시리즈에 대한 인체피부 개선효과 평가시험")
 
 
 def test_a_repeated_certificate_field_is_not_merged_twice():
@@ -409,3 +353,62 @@ def test_a_repeated_certificate_field_is_not_merged_twice():
     [merged] = ad_reading.merge_certificate(t, [b("특 허 증 0440357 호", 10), b("특허증 특허 제 0440357 호 출원일 2001년 10월 25일", 40),
                                                 b("특허청", 300), b("특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE", 310)])
     assert merged["text"] == "특허증 특허 제 0440357 호 출원일 2001년 10월 25일 특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE"
+
+
+def test_letters_spread_by_design_are_joined_only_where_the_ocr_saw_them_one_by_one():
+    t = tile()
+    width, height = t.source_size
+
+    def line(text, x0, x1, y=100):
+        return {"id": text, "text": text, "words": [], "ocrConfidence": 99.0,
+                "location": t.location(precise_box=[x0/width, y/height, x1/width, (y+30)/height], method="PADDLE_OCR")}
+    spread = [line("가", 20, 40), line("나", 70, 90), line("다", 120, 140), line("라마", 200, 260, y=300)]
+    words = ad_reading.spread_words(spread)
+    assert words[0] == "가나다"
+    assert ad_reading.close_spread("가 나 다 라마", words) == "가나다 라마"
+    # Ordinary one-syllable words the OCR read with spaces are left alone; a word it read unbroken closes up.
+    assert ad_reading.spread_words([line("더 큰 힘", 20, 200)]) == []
+    assert ad_reading.close_spread("라 바 사 조각", ad_reading.spread_words([line("라바사", 20, 200)])) == "라바사 조각"
+    assert ad_reading.close_spread("피부 노화", ["피부노화"]) == "피부 노화"  # only fully spread letters close
+
+
+async def test_parts_the_reader_marked_as_one_document_are_merged_others_are_not(monkeypatch):
+    t = tile()
+    monkeypatch.setattr(ad_reading, "local_ocr", tesseract_lines)
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            def g(kind, text):
+                return {"kind": kind, "role": "claim", "segments": [text], "labels": [], "box_numbers": [], "box": []}
+            return AdCopy(layout=[], on_product_text=[], groups=[
+                g("certificate", "○○서"), g("copy", "집중 케어!"), g("certificate", "번호 제 AA-0000 호"),
+                g("certificate", "발급일 2000년 1월 1일"), g("footnote", "*개인차 있음")])
+
+    blocks, _ = await read_tile(Provider(), t)
+    assert [b["text"] for b in blocks] == ["○○서 번호 제 AA-0000 호 발급일 2000년 1월 1일", "집중 케어!", "*개인차 있음"]
+    assert blocks[0]["documentContext"] == "certificate"
+
+
+async def test_unit_review_puts_a_documents_scattered_parts_back_only_when_a_document_is_present(monkeypatch):
+    t = tile()
+    monkeypatch.setattr(ad_reading, "local_ocr", tesseract_lines)
+    asked = []
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            asked.append(schema.__name__)
+            def g(kind, text):
+                return {"kind": kind, "role": "claim", "segments": [text], "labels": [], "box_numbers": [], "box": []}
+            if schema is AdCopy:
+                return AdCopy(layout=[], on_product_text=[], groups=[
+                    g("certificate", "○○서 번호 제 AA-0000 호"), g("copy", "집중 케어!"), g("footnote", "발급일 2000년 1월 1일")])
+            assert schema is ad_reading.UnitReview and "3. [footnote] 발급일" in kwargs["text"]
+            return ad_reading.UnitReview(documents=[[1, 3]], not_documents=[])
+
+    blocks, _ = await read_tile(Provider(), t)
+    assert [b["text"] for b in blocks] == ["○○서 번호 제 AA-0000 호 발급일 2000년 1월 1일", "집중 케어!"]
+    assert asked[:2] == ["AdCopy", "UnitReview"]
