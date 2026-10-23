@@ -390,7 +390,7 @@ def same_row(lines: list[dict]) -> list[list[dict]]:
 
 
 CERTIFICATE_FIELD = re.compile(r"특허증|특허\s*제|허\s*제\s*\d{7}|출원\s*번호|출원일|등록일|공개일|등록번호|특허청(?:장)?|"
-                               r"(?i:commission(?:er)?\s+(?:of|on)?\s*the\s+korean\s+intellectual\s+property\s+office)|"
+                               r"(?i:(?:commission(?:er)?\s+(?:of|on)?\s*the\s+)?korean\s+intellectual\s+property(?:\s+office)?)|"
                                r"제\s*\d{4}-\d{7}\s*호|\d{7}\s*호|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일")
 
 

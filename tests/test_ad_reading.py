@@ -386,4 +386,5 @@ def test_the_issuing_office_under_a_certificate_is_part_of_it():
     assert ad_reading.certificate_field("특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE")
     assert ad_reading.certificate_field("특 허 청")
     assert ad_reading.certificate_field("특허청 COMMERCIALIZATION OF KOREAN INTELLECTUAL PROPERTY")
+    assert ad_reading.certificate_field("COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY")
     assert not ad_reading.certificate_field("볼꺼짐 탄력섬유재생!")
