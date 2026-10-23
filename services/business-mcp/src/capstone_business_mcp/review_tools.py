@@ -153,6 +153,7 @@ async def structure(tenant_id,review_id,documents,version_no,run_token):
         read.append({"id":doc["id"],"name":doc.get("name"),"docType":doc.get("docType",""),"pages":doc.get("pages"),
                      "characters":len(text),"text":text[:30000],"issuer":doc.get("issuer"),"codes":doc.get("codes",[]),
                      "version":doc.get("version"),"productPages":doc.get("productPages",[]),"results":doc.get("results",[]),
+                     "checkPages":doc.get("checkPages",[]),
                      "readerVersion":doc.get("readerVersion")})
     status="extracted" if read and not failures else "partial" if read else "not_submitted" if not stored else "failed"
     return {"status":status,"text":"\n".join(d["text"] for d in read)[:60000],"documents":read,

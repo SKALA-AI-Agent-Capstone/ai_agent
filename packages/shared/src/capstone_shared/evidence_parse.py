@@ -20,30 +20,37 @@ def describe(result: ReadResult, product_name: str | None = None) -> dict:
     warnings = list(result.warnings)
     if product_name and names and match is None:
         warnings.append("PRODUCT_NOT_IN_REPORT")
+    if result.check_pages:
+        warnings.append("OCR_VLM_MISMATCH:" + ",".join(str(n) for n in result.check_pages))
     if any(code["status"] in ("ambiguous", "unconfirmed", "single_page") for code in who.codes) or (not who.codes):
         warnings.append("CODE_NEEDS_CONFIRMATION")
     return {
         "readerVersion": result.reader_version,
         "pageCount": result.page_count,
         "pages": [{"n": p.number, "kind": p.kind, "method": p.method, "chars": p.chars, "text": p.text,
-                   "confidence": p.confidence, "warnings": p.warnings} for p in result.pages],
+                   "confidence": p.confidence, "warnings": p.warnings, "check": p.check} for p in result.pages],
         "unreadPages": result.unread_pages,
+        "checkPages": result.check_pages,
         "issuer": {"key": who.issuer_key, "name": who.issuer_name} if who.issuer_key else None,
         "codes": who.codes,
         "version": who.version,
         "issuedOn": who.issued_on,
         "products": products,
-        "productMatch": ({**products[match[0]], "score": round(match[1], 3)} if match else None),
+        # Pages of this product where OCR and the vision model disagree: the figures there need a person's look.
+        "productMatch": ({**products[match[0]], "score": round(match[1], 3),
+                          "checkPages": [n for n in products[match[0]]["pages"] if n in result.check_pages]} if match else None),
         "warnings": warnings,
     }
 
 
 def parse_evidence(raw: bytes, product_name: str | None = None, *, prefer: str = "auto",
-                   ocr_budget_seconds: float | None = 240, max_ocr_pages: int | None = 40, ocr=None) -> dict:
+                   ocr_budget_seconds: float | None = 240, max_ocr_pages: int | None = 40, ocr=None, crosscheck=None) -> dict:
     """Raises ValueError with a specific code (FILE_TOO_LARGE, EVIDENCE_PAGE_LIMIT, PDF_OR_IMAGE_REQUIRED)."""
     options = {"prefer": prefer, "ocr_budget_seconds": ocr_budget_seconds, "max_ocr_pages": max_ocr_pages}
     if ocr is not None:
         options["ocr"] = ocr
+    if crosscheck is not None:
+        options["crosscheck"] = crosscheck
     return describe(read_document(raw, **options), product_name)
 
 

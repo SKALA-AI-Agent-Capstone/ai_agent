@@ -39,7 +39,7 @@ async def test_unreadable_missing_and_slow_files_get_their_own_errors(monkeypatc
     async def gone(evidence_id):
         raise httpx.HTTPStatusError("404", request=httpx.Request("GET", "http://x"), response=httpx.Response(404))
 
-    async def slow(request):
+    async def slow(request, provider=None):
         raise TimeoutError
 
     for fetch, status, detail in ((garbage, 422, "PDF_OR_IMAGE_REQUIRED"), (gone, 404, "EVIDENCE_FILE_NOT_FOUND")):
