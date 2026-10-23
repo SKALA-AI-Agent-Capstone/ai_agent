@@ -158,18 +158,17 @@ def prepare_document(raw: bytes, asset: dict) -> tuple[list[dict], list[Tile]]:
         raise ValueError("FILE_TOO_LARGE")
     blocks, tiles = [], []
     if raw.startswith(b"%PDF-"):
-        with pdfplumber.open(BytesIO(raw)) as text_pdf, pdfium.PdfDocument(raw) as visual_pdf:
-            if not 1 <= len(text_pdf.pages) <= 20:
-                raise ValueError("PDF_PAGE_LIMIT")
-            for index, page in enumerate(text_pdf.pages):
-                for line_no, line in enumerate(page.extract_text_lines()):
-                    text = line["text"].strip()
-                    if not text:
-                        continue
-                    blocks.append({"id":f"{asset['id']}:p{index+1}:l{line_no}", "text":text,
-                        "location":{"kind":"image", "fileId":asset["id"], "fileName":asset["name"],
-                            "page":index+1, "coordinateSource":"PDF_TEXT",
-                            "bbox":[line["x0"]/page.width,line["top"]/page.height,line["x1"]/page.width,line["bottom"]/page.height]}})
+        # The shared page reader gives the text-layer lines and their boxes (the exact wording and where it is);
+        # every page is also cut into tiles for the vision read of the copy, as before.
+        from .reading import read_pdf
+        layout = read_pdf(raw, max_pages=20, max_ocr_pages=0, with_lines=True, page_limit_error="PDF_PAGE_LIMIT")
+        for page in layout.pages:
+            for line in page.lines:
+                blocks.append({"id":f"{asset['id']}:p{page.number}:l{line['index']}", "text":line["text"],
+                    "location":{"kind":"image", "fileId":asset["id"], "fileName":asset["name"],
+                        "page":page.number, "coordinateSource":"PDF_TEXT", "bbox":line["bbox"]}})
+        with pdfium.PdfDocument(raw) as visual_pdf:
+            for index in range(len(visual_pdf)):
                 pdf_page = visual_pdf[index]
                 if pdf_page.get_width()*pdf_page.get_height()*4 > 40_000_000:
                     raise ValueError("PDF_PAGE_PIXELS_LIMIT")

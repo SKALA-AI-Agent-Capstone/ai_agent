@@ -8,7 +8,9 @@ import re
 from pydantic import BaseModel
 
 from .pdf_tables import s01_annex_rows
-from .pdf_vision import PdfVisionError, needs_vision, render_page, render_page_columns
+from capstone_shared.reading import image_ratio
+
+from .pdf_vision import PdfVisionError, read_public_pdf, render_page, render_page_columns, wants_vision
 
 
 class ImageRead(BaseModel):
@@ -70,15 +72,16 @@ def _cross_check(client, model: str, images: list[str], draft: str) -> ImageChec
 
 
 def _image_area(page) -> float:
-    area = float(page.width * page.height)
-    image_area = sum(max(0, image["x1"] - image["x0"]) *
-                     max(0, image["bottom"] - image["top"]) for image in page.images)
-    return image_area / area if area else 0.0
+    return image_ratio(page)
+
+
+def _is_image_page(ratio: float, native: str) -> bool:
+    # Slides may contain several separate screenshots, each below wants_vision's 35% cutoff.
+    return wants_vision(ratio, native) or (ratio >= 0.1 and len(native.strip()) < 350)
 
 
 def _image_page(page, native: str) -> bool:
-    # Slides may contain several separate screenshots, each below needs_vision's 35% cutoff.
-    return needs_vision(page, native) or (_image_area(page) >= 0.1 and len(native.strip()) < 350)
+    return _is_image_page(image_ratio(page), native)
 
 
 COMPARISON_LABELS = (("개정 전", "개정 후"), ("변경 전", "변경 후"))
@@ -177,16 +180,13 @@ def _attempt(client, model: str, images: list[str], native: str) -> tuple[str, l
 
 def image_page_numbers(pdf_path: Path, page_numbers: set[int] | None = None) -> tuple[list[int], int]:
     """1-based image pages (the ones sent to a vision model) and how many pages were looked at."""
-    import pdfplumber
-
     found, total = [], 0
-    with pdfplumber.open(pdf_path) as pdf:
-        for number, page in enumerate(pdf.pages, 1):
-            if page_numbers is not None and number not in page_numbers:
-                continue
-            total += 1
-            if _image_page(page, (page.extract_text() or "").strip()):
-                found.append(number)
+    for page in read_public_pdf(pdf_path).pages:
+        if page_numbers is not None and page.number not in page_numbers:
+            continue
+        total += 1
+        if _is_image_page(page.image_ratio, page.text):
+            found.append(page.number)
     return found, total
 
 

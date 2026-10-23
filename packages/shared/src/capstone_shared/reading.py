@@ -24,7 +24,6 @@ import time
 from typing import Callable
 
 from PIL import Image
-import pdfplumber
 import pypdfium2 as pdfium
 
 from . import ocr_engine
@@ -57,6 +56,8 @@ class PageText:
     confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
     check: dict | None = None   # second reader's verdict: {"status": match | needs_review | skipped | unavailable, ...}
+    image_ratio: float = 0.0    # share of the page covered by pictures
+    lines: list[dict] | None = None  # with_lines: text-layer lines {"index", "text", "bbox" (page ratios)}
 
     @property
     def chars(self) -> int:
@@ -133,6 +134,20 @@ def image_ratio(page) -> float:
     return min(1.0, covered / area) if area else 0.0
 
 
+def text_lines(page) -> list[dict]:
+    """Text-layer lines with their boxes as page ratios. index counts every line pdfplumber returns, so ids built from
+    it stay the same whether or not a line turns out empty. A glyph without a Unicode mapping stays as "(cid:N)": the
+    line points at an exact place, and silently dropping the glyph would turn "탈락" into "탈" without a trace."""
+    lines = []
+    for index, line in enumerate(page.extract_text_lines()):
+        text = line["text"].strip()
+        if text:
+            lines.append({"index": index, "text": text,
+                          "bbox": [line["x0"] / page.width, line["top"] / page.height,
+                                   line["x1"] / page.width, line["bottom"] / page.height]})
+    return lines
+
+
 def merge_unique(layer: str, ocr: str) -> str:
     """The text layer, then the OCR lines it does not already contain."""
     known = squash(layer)
@@ -158,43 +173,74 @@ def _render(pdf_page, scale: float) -> Image.Image:
 
 def read_pdf(raw: bytes, *, max_pages: int = MAX_PAGES, prefer: str = "auto", ocr_budget_seconds: float | None = None,
              max_ocr_pages: int | None = None, scale: float = 2.0, ocr: OcrCall | None = None,
-             crosscheck: CrossCheck | None = None) -> ReadResult:
-    """Read every page. ocr_budget_seconds and max_ocr_pages bound the OCR; pages left unread are listed."""
-    if len(raw) > MAX_BYTES:
+             crosscheck: CrossCheck | None = None, with_lines: bool = False, max_bytes: int | None = MAX_BYTES,
+             page_limit_error: str = "EVIDENCE_PAGE_LIMIT") -> ReadResult:
+    """Read every page. ocr_budget_seconds and max_ocr_pages bound the OCR; pages left unread are listed.
+
+    max_ocr_pages=0 reads the text layer only and still classifies every page (the RAG index and the ad reader send
+    picture pages to a vision model themselves). with_lines adds each text-layer line with its box, for callers that
+    must point at where a phrase is."""
+    if max_bytes is not None and len(raw) > max_bytes:
         raise ValueError("FILE_TOO_LARGE")
     ocr = ocr or ocr_engine.read_image
     checker = Checker(crosscheck)
     deadline = time.monotonic() + ocr_budget_seconds if ocr_budget_seconds else None
+    # pdfium is opened only when a page has to be rendered for OCR: a text-layer read (the RAG index, ad text lines)
+    # never loads it.
+    rendered: list = []
+
+    def visual(index: int):
+        if not rendered:
+            rendered.append(pdfium.PdfDocument(raw))
+        return rendered[0][index]
+
+    try:
+        return _read_pages(raw, max_pages, page_limit_error, with_lines, deadline, max_ocr_pages, ocr, prefer, scale,
+                           checker, visual)
+    finally:
+        for document in rendered:
+            document.close()
+
+
+def _read_pages(raw, max_pages, page_limit_error, with_lines, deadline, max_ocr_pages, ocr, prefer, scale, checker,
+                visual) -> ReadResult:
+    import pdfplumber  # looked up per call, so a caller's stand-in module is honoured
     pages: list[PageText] = []
     unread: list[int] = []
     warnings: list[str] = []
     ocr_pages = 0
-    with pdfplumber.open(BytesIO(raw)) as text_pdf, pdfium.PdfDocument(raw) as visual_pdf:
+    with pdfplumber.open(BytesIO(raw)) as text_pdf:
         count = len(text_pdf.pages)
         if not 1 <= count <= max_pages:
-            raise ValueError("EVIDENCE_PAGE_LIMIT")
+            raise ValueError(page_limit_error)
         for index, page in enumerate(text_pdf.pages):
             number = index + 1
             layer_raw = page.extract_text() or ""
             cid_count = len(CID.findall(layer_raw))
             layer = CID.sub("", layer_raw).strip()
-            kind = classify_page(layer_raw, image_ratio(page))
+            ratio = image_ratio(page)
+            kind = classify_page(layer_raw, ratio)
             notes = [f"CID_GLYPHS:{cid_count}"] if cid_count else []
+            page_lines = text_lines(page) if with_lines else None
+
+            def add(item: PageText) -> None:
+                item.image_ratio, item.lines = ratio, page_lines
+                pages.append(item)
             if kind == "text":
-                pages.append(PageText(number, kind, "text_layer", layer, None, notes))
+                add(PageText(number, kind, "text_layer", layer, None, notes))
                 continue
             over_budget = (deadline is not None and time.monotonic() > deadline) or \
                 (max_ocr_pages is not None and ocr_pages >= max_ocr_pages)
             if over_budget:
-                pages.append(PageText(number, kind, "text_layer" if layer else "none", layer, None, notes + ["OCR_SKIPPED"]))
+                add(PageText(number, kind, "text_layer" if layer else "none", layer, None, notes + ["OCR_SKIPPED"]))
                 if len(squash(layer)) < TEXT_MIN:
                     unread.append(number)
                 continue
             try:
-                image = _render(visual_pdf[index], scale)
+                image = _render(visual(index), scale)
                 output = ocr(image, prefer)
             except Exception:
-                pages.append(PageText(number, kind, "text_layer" if layer else "none", layer, None, notes + ["OCR_FAILED"]))
+                add(PageText(number, kind, "text_layer" if layer else "none", layer, None, notes + ["OCR_FAILED"]))
                 if len(squash(layer)) < TEXT_MIN:
                     unread.append(number)
                 continue
@@ -202,15 +248,15 @@ def read_pdf(raw: bytes, *, max_pages: int = MAX_PAGES, prefer: str = "auto", oc
             if output.fell_back:
                 notes.append("PADDLE_FAILED_TESSERACT_USED")
             if kind == "mixed":
-                pages.append(PageText(number, kind, f"text_layer+{output.engine}", merge_unique(layer, output.text),
+                add(PageText(number, kind, f"text_layer+{output.engine}", merge_unique(layer, output.text),
                                       output.confidence, notes))
             elif kind == "layered_scan" and agreement(layer, output.text) >= LAYER_AGREEMENT:
-                pages.append(PageText(number, kind, "text_layer", layer, output.confidence, notes))
+                add(PageText(number, kind, "text_layer", layer, output.confidence, notes))
             else:
                 if kind == "layered_scan":
                     notes.append("TEXT_LAYER_DISAGREES_WITH_OCR")
                 text = output.text if output.text.strip() else layer
-                pages.append(PageText(number, kind, output.engine if output.text.strip() else "text_layer", text,
+                add(PageText(number, kind, output.engine if output.text.strip() else "text_layer", text,
                                       output.confidence, notes))
             if not pages[-1].text.strip():
                 unread.append(number)
