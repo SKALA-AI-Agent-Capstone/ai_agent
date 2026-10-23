@@ -484,6 +484,16 @@ def tool_succeeded(output):
     return True
 
 
+def evidence_total(request) -> int:
+    """Evidence this review can rest on: files sent with the review plus the product's own evidence that Spring already
+    holds a read result for. Counting only the files sent made a product whose evidence was registered once look as if
+    nothing had been submitted (the model skipped the tool, and every figure claim came back 'no evidence')."""
+    if request is None:
+        return 0
+    sent = len([a for a in request.assets if a.role == "evidence"])
+    return sent + int(getattr(request, "productEvidenceCount", 0) or 0)
+
+
 async def select_business_tools(provider, state, request):
     """business 노드의 도구선택 loop. LLM은 findings를 보고 structure_evidence/verify_functional_approval/
     verify_patent 중 관련 있는 것만 고른다 — 매번 조건문으로 다 지나가는 게 아니라 실제로 선택이다.
@@ -555,7 +565,7 @@ async def select_business_tools(provider, state, request):
             f"광고에서 추출한 확인 대상 문구:\n{findings_summary}\n\n"
             f"제품명: {product.get('name') or '(없음)'}\n"
             f"기능성 심사·보고번호 입력값: {report or '(없음)'}\n"
-            f"제출된 증빙서류: {len(documents)}건\n"
+            f"제출된 증빙서류: {evidence_total(request)}건 (제품에 등록된 증빙 {int(getattr(request, 'productEvidenceCount', 0) or 0)}건 포함)\n"
             f"광고 문구에서 찾은 특허번호 형식 문자열: {len(candidate_numbers)}건"},
     ]
     called = []
@@ -730,8 +740,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
     async def checks(state):
         result = state["result"]
         # Evidence uploaded with this review and evidence registered on the product (read before submission).
-        evidence_count = (len([a for a in request.assets if a.role == "evidence"])
-                          + int(getattr(request, "productEvidenceCount", 0) or 0)) if request else 0
+        evidence_count = evidence_total(request)
         evidence, matches, warnings = dict(result["evidence"]), {}, []
         if evidence.get("documents") and provider.client:
             # 증빙마다 시험 요약을 만들고, 실증이 필요한 주장과 한 번에 대조한다(evidence.py).
