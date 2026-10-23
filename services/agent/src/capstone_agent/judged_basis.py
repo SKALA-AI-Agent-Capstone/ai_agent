@@ -34,6 +34,7 @@ MAX_BASIS_CALLS = 4
 MAX_SAME_BASIS_TOOL = 2
 BASIS_LOOP_SECONDS = 45
 MAX_VERIFIED_BASIS = 2
+JUDGE_BATCH = 10
 CANDIDATE_TEXT = 1200
 
 
@@ -104,10 +105,15 @@ async def judge(provider, findings: list[dict], texts_by_id: dict, sections: dic
     def context(f):
         near = section_of(f, texts_by_id, sections)[:8]
         return "; ".join(f"({ROLE_NAMES.get(t.get('role'), '문구')}) {t['text'][:60]}" for t in near) or "(없음)"
-    listing = "\n".join(f"[{f['id']}] 문구: {f['phrase']}\n줄 전체: {line_of(f, texts_by_id)}\n같은 구간: {context(f)}"
-                        f"\n1차 메모: {f.get('reason', '')}" for f in findings)
-    output = await provider.parse(instruction("claim_judgment"), ClaimJudgments, text=listing)
-    return {j.id: j for j in output.judgments}
+    def listing(part):
+        return "\n".join(f"[{f['id']}] 문구: {f['phrase']}\n줄 전체: {line_of(f, texts_by_id)}\n같은 구간: {context(f)}"
+                         f"\n1차 메모: {f.get('reason', '')}" for f in part)
+    # Judged in small batches: one long listing was cut at the input budget and the cut candidates went through
+    # unjudged, so nothing was ever dismissed.
+    parts = [findings[i:i + JUDGE_BATCH] for i in range(0, len(findings), JUDGE_BATCH)]
+    outputs = await asyncio.gather(*(provider.parse(instruction("claim_judgment"), ClaimJudgments, text=listing(part))
+                                     for part in parts))
+    return {j.id: j for output in outputs for j in output.judgments}
 
 
 def span_box(span: str, block: dict | None):
@@ -125,6 +131,23 @@ def span_box(span: str, block: dict | None):
     if not boxes:
         return None
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+
+
+def is_figure_row(block: dict | None) -> bool:
+    """A row of a figure list (the reader's kind table) that states a figure."""
+    return bool(block) and block.get("kind") == "table" and bool(re.search(r"\d", block.get("text", "")))
+
+
+def figure_rows(texts: list[dict]) -> list[dict]:
+    return [t for t in texts if is_figure_row(t)]
+
+
+def figure_candidate(block: dict) -> dict:
+    return {"id": f"row-{block['id']}", "phrase": block["text"], "start": 0, "end": len(block["text"]),
+            "location": block["location"], "textId": block["id"], "severity": "low", "baseSeverity": "low",
+            "claimType": "clinical", "reason": "수치로 효능을 표시한 목록의 한 줄입니다.", "title": "확인할 수치 표현",
+            "basis": [], "baseBasis": [], "confidence": None, "rewrites": [], "references": [],
+            "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None, "source": "figure_row"}
 
 
 def apply_judgment(finding: dict, judgment: Judgment | None, block: dict | None = None) -> dict:
@@ -358,6 +381,12 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
             except Exception:
                 swept = []
         candidates = findings + swept
+        # Every row of a figure list is a factual claim the advertiser must substantiate, so a row the extraction
+        # skipped still becomes a candidate.
+        listed = {c.get("textId") for c in candidates}
+        for block in figure_rows(section_texts or texts or []):
+            if block["id"] not in listed:
+                candidates.append(figure_candidate(block))
         if not candidates:
             return [], [], [], []
         warnings = []
@@ -368,6 +397,11 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
         kept, dismissed, seen = [], [], {}
         for finding in candidates:
             judgment = judgments.get(finding["id"])
+            if judgment is not None and not judgment.problem and is_figure_row(texts_by_id.get(finding.get("textId"))):
+                # The judge may not wave a figure row through: its figure still needs substantiation.
+                judgment = judgment.model_copy(update={"problem": True, "claimType": "clinical",
+                                                       "purpose": judgment.purpose or "수치로 표시한 효능의 실증 자료",
+                                                       "reason": "수치로 효능을 표시해 실증 자료가 필요합니다."})
             if judgment is not None and not judgment.problem:
                 dismissed.append({"id": finding["id"], "phrase": finding["phrase"], "textId": finding.get("textId"),
                                   "reason": judgment.reason, "source": finding.get("source", "model")})

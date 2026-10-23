@@ -412,3 +412,38 @@ async def test_unit_review_puts_a_documents_scattered_parts_back_only_when_a_doc
     blocks, _ = await read_tile(Provider(), t)
     assert [b["text"] for b in blocks] == ["○○서 번호 제 AA-0000 호 발급일 2000년 1월 1일", "집중 케어!"]
     assert asked[:2] == ["AdCopy", "UnitReview"]
+
+
+async def test_unit_review_cannot_absorb_ad_copy_or_figure_rows_into_a_document(monkeypatch):
+    t = tile()
+    monkeypatch.setattr(ad_reading, "local_ocr", tesseract_lines)
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            def g(kind, text):
+                return {"kind": kind, "role": "claim", "segments": [text], "labels": [], "box_numbers": [], "box": []}
+            if schema is AdCopy:
+                return AdCopy(layout=[], on_product_text=[], groups=[
+                    g("certificate", "*○○ 시험 결과"), g("copy", "○○으로 확인한 변화"), g("table", "보습 12.3% 개선")])
+            return ad_reading.UnitReview(documents=[[1, 2, 3]], not_documents=[])
+
+    blocks, _ = await read_tile(Provider(), t)
+    assert [(b["kind"], b["text"]) for b in blocks][:3] == [
+        ("certificate", "*○○ 시험 결과"), ("copy", "○○으로 확인한 변화"), ("table", "보습 12.3% 개선")]
+
+
+def test_a_unit_with_an_efficacy_percentage_is_reviewed_as_a_claim_not_kept_as_a_document():
+    reading = AdCopy(layout=[], on_product_text=[], groups=[
+        {"kind": "certificate", "role": "condition", "segments": ["○○ 결과", "보습 12.3% 개선"], "labels": [], "box_numbers": [], "box": []},
+        {"kind": "certificate", "role": "condition", "segments": ["발급일 2000년 1월 1일"], "labels": [], "box_numbers": [], "box": []}])
+    assert [g[1].kind for g in ad_reading.copy_groups(reading)] == ["copy", "certificate"]
+
+
+def test_an_ocr_line_inside_the_groups_area_joins_it_even_when_the_read_got_its_letters_wrong():
+    line = {"text": "볼꺼짐", "location": {"bbox": [0.1, 0.1, 0.3, 0.15]}}
+    [hits] = ad_reading.assign_lines(["불꺼질 탄력섬유재생!"], [[]], [line], [[0.05, 0.05, 0.9, 0.2]])
+    assert hits == [line]
+    [hits] = ad_reading.assign_lines(["불꺼질 탄력섬유재생!"], [[]], [line], [[0.5, 0.5, 0.9, 0.9]])
+    assert hits == []

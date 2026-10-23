@@ -117,7 +117,16 @@ def line_score(line: dict, text: str) -> float:
     return size / len(seen) if size >= max(3, int(len(seen) * 0.6)) else 0.0
 
 
-def assign_lines(texts: list[str], numbers: list[list[int]], lines: list[dict]) -> list[list[dict]]:
+def inside(line: dict, box) -> bool:
+    """The OCR line's centre lies in the group's area as the reader gave it (page ratios)."""
+    if not box or not line["location"].get("bbox"):
+        return False
+    x0, y0, x1, y1 = line["location"]["bbox"]
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return box[0] <= cx <= box[2] and box[1] <= cy <= box[3]
+
+
+def assign_lines(texts: list[str], numbers: list[list[int]], lines: list[dict], areas: list = ()) -> list[list[dict]]:
     """Each OCR line goes to the one group it matches best. A footnote that repeats the headline's words
     ('개선 효과') must not take the headline's line. A box the model named counts when its text still
     resembles the group (Tesseract garbles large styled Korean)."""
@@ -128,6 +137,10 @@ def assign_lines(texts: list[str], numbers: list[list[int]], lines: list[dict]) 
             score = line_score(line, text)
             if i in numbers[g] and SequenceMatcher(None, norm(line["text"]), norm(text)).ratio() >= 0.3:
                 score = max(score, 0.9)
+            # A misread word shares too few letters with the OCR line, but the line still sits where the reader
+            # said the group is; position ties it to the group, and the letter check then compares the two.
+            if not score and len(norm(line["text"])) >= 2 and g < len(areas) and inside(line, areas[g]):
+                score = 0.5
             # Ties go to the group the line makes up more of (a headline line, not a footnote fragment).
             scores.append(score + (0.01 * len(norm(line["text"])) / max(1, len(norm(text))) if score else 0))
         if scores and max(scores) > 0:
@@ -218,8 +231,14 @@ def copy_groups(reading: AdCopy) -> list[tuple]:
     groups = []
     for n, group in enumerate(reading.groups):
         segments = strip_product([x.strip() for x in group.segments if x.strip()], reading.on_product_text)
-        if segments:
-            groups.append((n, group, segments, " ".join(segments)))
+        if not segments:
+            continue
+        text = " ".join(segments)
+        if group.kind == "certificate" and re.search(r"\d\s*%", text):
+            # A unit stating an efficacy percentage is a claim to review even if it looks like a document;
+            # marked as a document it would be context only and never reviewed.
+            group = group.model_copy(update={"kind": "copy"})
+        groups.append((n, group, segments, text))
     return groups
 
 
@@ -291,7 +310,9 @@ async def review_units(provider, tile: Tile, groups: list[tuple]) -> list[tuple]
             out[number - 1] = (n, group.model_copy(update={"kind": "copy"}), segments, text)
     for members in review.documents:
         for number in members:
-            if 1 <= number <= len(out):
+            # Only a document's own parts read as footnotes can join it; ad copy and figure rows are claims and
+            # must stay reviewable even if the reviewer reaches for them.
+            if 1 <= number <= len(out) and out[number - 1][1].kind in ("certificate", "footnote"):
                 n, group, segments, text = out[number - 1]
                 out[number - 1] = (n, group.model_copy(update={"kind": "certificate"}), segments, text)
     return out
@@ -527,7 +548,8 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
         return tesseract_blocks(tile, lines), warnings + [f"{tile.id}:OCR_PROVIDER_FAILED"]
     groups = await review_units(provider, tile, copy_groups(reading))
     spread = spread_words(lines)
-    assigned = assign_lines([g[3] for g in groups], [g[1].box_numbers for g in groups], lines)
+    assigned = assign_lines([g[3] for g in groups], [g[1].box_numbers for g in groups], lines,
+                            [vision_box(tile, g[1].box) for g in groups])
     blocks = []
     for (n, group, segments, text), hits in zip(groups, assigned):
         model = vision_box(tile, group.box)

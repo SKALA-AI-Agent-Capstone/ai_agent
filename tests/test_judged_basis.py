@@ -176,3 +176,24 @@ async def test_claims_of_one_section_and_type_share_one_tool_loop_but_are_verifi
     assert [t for t, _ in rag.calls].count("search_regulations") == 1  # one loop for the bundle
     assert sum(1 for name, _ in model.seen if name == "BasisCheck") == 2  # each claim verified on its own
     assert all(f["basisTrace"]["bundle"] == ["f1", "f2"] and f["legalSearch"] == "verified" for f in out["findings"])
+
+
+async def test_every_figure_row_is_a_card_even_when_extraction_skips_it_or_the_judge_waves_it_through():
+    loc = {"kind": "image", "fileId": "a", "page": 1, "bbox": None, "tileId": "a:p1:t2"}
+    texts = [{"id": "r1", "text": "탄성 4.5% 개선", "role": "result", "kind": "table", "location": loc},
+             {"id": "r2", "text": "보습 12.3% 개선", "role": "result", "kind": "table", "location": loc},
+             {"id": "r3", "text": "피부결 6.1% 개선", "role": "result", "kind": "table", "location": loc}]
+    rag = Rag([[SUBSTANTIATION]] * 3)
+
+    class Judge(Model):
+        async def parse(self, prompt, schema, **kwargs):
+            self.seen.append((schema.__name__, kwargs["text"]))
+            if schema is ClaimJudgments:
+                return ClaimJudgments(judgments=[
+                    {"id": "f1", "problem": True, "claimType": "clinical", "span": "4.5%", "purpose": "실증", "reason": "수치"},
+                    {"id": "row-r2", "problem": False, "claimType": "exaggeration", "span": "", "purpose": "", "reason": "기능성 아님"}])
+            return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
+
+    out = await judged_basis([finding("f1", "탄성 4.5% 개선", "r1")], Judge([]), texts=texts, section_texts=texts, call=rag)
+    assert sorted(f["textId"] for f in out["findings"]) == ["r1", "r2", "r3"]  # r2 kept despite the judge, r3 added
+    assert out["dismissed"] == []
