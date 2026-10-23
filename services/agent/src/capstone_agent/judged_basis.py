@@ -39,15 +39,8 @@ JUDGE_REASONING = "low"
 CANDIDATE_TEXT = 1200
 
 
-FactType = Literal["figure", "test", "authority", "medical", "functional", "superlative", "property", "none"]
-
-
 class Judgment(BaseModel):
     id: str
-    # What in the wording a reviewer could check against a document, quoted from the phrase. Asked before problem
-    # so the decision rests on words that are there, not on how strongly the phrase sounds.
-    factType: FactType
-    factWords: str
     problem: bool
     claimType: ClaimType
     span: str
@@ -124,25 +117,7 @@ async def judge(provider, findings: list[dict], texts_by_id: dict, sections: dic
     # almost five times the time.
     outputs = await asyncio.gather(*(provider.parse(instruction("claim_judgment"), ClaimJudgments, text=listing(part),
                                                     reasoning=JUDGE_REASONING) for part in parts))
-    by_id = {f["id"]: f for f in findings}
-    return {j.id: grounded(j, by_id.get(j.id), texts_by_id) for output in outputs for j in output.judgments}
-
-
-def letters(text: str) -> str:
-    """Letters, digits, % and . only: the quoted words are compared without spacing or punctuation."""
-    return re.sub(r"[^0-9A-Za-z가-힣%.]", "", text or "").lower()
-
-
-def grounded(judgment: Judgment, finding: dict | None, texts_by_id: dict) -> Judgment:
-    """A card needs something checkable written in the phrase. With no fact type, or quoted words that are not in
-    the phrase or its line, there is nothing for the reviewer to compare, however strong the wording sounds."""
-    if not judgment.problem or finding is None:
-        return judgment
-    words = letters(judgment.factWords)
-    written = letters(finding["phrase"]) + "\n" + letters(line_of(finding, texts_by_id))
-    if judgment.factType != "none" and words and words in written:
-        return judgment
-    return judgment.model_copy(update={"problem": False, "reason": "문구에 자료로 확인할 수치, 시험, 공적 근거, 효능 단정이 쓰여 있지 않습니다."})
+    return {j.id: j for output in outputs for j in output.judgments}
 
 
 def span_box(span: str, block: dict | None):
@@ -162,19 +137,23 @@ def span_box(span: str, block: dict | None):
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
-def is_figure_row(block: dict | None) -> bool:
-    """A row of a figure list (the reader's kind table) that states a figure."""
-    return bool(block) and block.get("kind") == "table" and bool(re.search(r"\d", block.get("text", "")))
+# A percentage in ad copy reads as a test or survey result, so it needs the test report whatever the wording.
+PERCENT = re.compile(r"\d+(?:[.,]\d+)?\s*%")
 
 
-def figure_rows(texts: list[dict]) -> list[dict]:
-    return [t for t in texts if is_figure_row(t)]
+def states_percent(block: dict | None) -> bool:
+    """Ad copy (not a test-condition footnote) that states a percentage."""
+    return bool(block) and block.get("role") != "condition" and bool(PERCENT.search(block.get("text", "")))
+
+
+def percent_copy(texts: list[dict]) -> list[dict]:
+    return [t for t in texts if states_percent(t)]
 
 
 def figure_candidate(block: dict) -> dict:
     return {"id": f"row-{block['id']}", "phrase": block["text"], "start": 0, "end": len(block["text"]),
             "location": block["location"], "textId": block["id"], "severity": "low", "baseSeverity": "low",
-            "claimType": "clinical", "reason": "수치로 효능을 표시한 목록의 한 줄입니다.", "title": "확인할 수치 표현",
+            "claimType": "clinical", "reason": "백분율로 효능이나 결과를 표시한 문구입니다.", "title": "확인할 수치 표현",
             "basis": [], "baseBasis": [], "confidence": None, "rewrites": [], "references": [],
             "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None, "source": "figure_row"}
 
@@ -410,10 +389,9 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
             except Exception:
                 swept = []
         candidates = findings + swept
-        # Every row of a figure list is a factual claim the advertiser must substantiate, so a row the extraction
-        # skipped still becomes a candidate.
+        # Ad copy stating a percentage needs the test report, so copy the extraction skipped still becomes a candidate.
         listed = {c.get("textId") for c in candidates}
-        for block in figure_rows(section_texts or texts or []):
+        for block in percent_copy(section_texts or texts or []):
             if block["id"] not in listed:
                 candidates.append(figure_candidate(block))
         if not candidates:
@@ -426,10 +404,8 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
         kept, dismissed, seen = [], [], {}
         for finding in candidates:
             judgment = judgments.get(finding["id"])
-            if judgment is not None and not judgment.problem and judgment.factType == "figure" \
-                    and is_figure_row(texts_by_id.get(finding.get("textId"))):
-                # The judge may not wave a figure through on a list row: the figure still needs substantiation.
-                # A row it finds no figure in (a scale legend, a pack count, an ingredient list) may go.
+            if judgment is not None and not judgment.problem and PERCENT.search(finding["phrase"]):
+                # The judge may not wave a percentage through: it still needs the test report.
                 judgment = judgment.model_copy(update={"problem": True, "claimType": "clinical",
                                                        "purpose": judgment.purpose or "수치로 표시한 효능의 실증 자료",
                                                        "reason": "수치로 효능을 표시해 실증 자료가 필요합니다."})
