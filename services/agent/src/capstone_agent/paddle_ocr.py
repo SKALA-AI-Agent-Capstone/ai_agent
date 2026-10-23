@@ -5,31 +5,14 @@ and on five real ads it placed 168 of 172 copy blocks against Tesseract's 78 of 
 (2026-10-22 comparison).
 Its text is used for position and for checking the vision read, never as the wording on a card.
 
-One engine is shared and predictions run one at a time: the predictor is not thread safe.
+One engine is shared and predictions run one at a time: the predictor is not thread safe. The engine and its
+lock live in capstone_shared.ocr_engine, so the evidence reader uses the same single instance.
 OCR_ENGINE=tesseract, or a missing paddleocr package, falls back to Tesseract in ad_reading.
 """
-from functools import cache
-import os
-import threading
+from capstone_shared import ocr_engine
+from capstone_shared.ocr_engine import engine, paddle_enabled as enabled  # noqa: F401  (re-exported)
 
-_lock = threading.Lock()
-
-
-def enabled() -> bool:
-    if os.getenv("OCR_ENGINE", "paddle").lower() != "paddle":
-        return False
-    try:
-        import paddleocr  # noqa: F401
-    except ImportError:
-        return False
-    return True
-
-
-@cache
-def engine():
-    from paddleocr import PaddleOCR
-    return PaddleOCR(text_detection_model_name="PP-OCRv5_mobile_det", text_recognition_model_name="korean_PP-OCRv5_mobile_rec",
-                     use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False)
+_lock = ocr_engine.LOCK
 
 
 def split_words(text: str, box: list[float]) -> list[dict]:
