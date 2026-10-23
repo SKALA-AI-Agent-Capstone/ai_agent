@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from capstone_shared.documents import prepare_document, Tile
 from capstone_shared.settings import internal_token, required_env
 from .observability import traced_client
-from .checks import cross_checks
+from .checks import cross_checks, resolved_by_evidence
 from .ad_reading import read_tile
 from .evidence import summarize, match as match_evidence
 from .instructions import instruction
@@ -583,6 +583,13 @@ async def select_business_tools(provider, state, request):
                 output = await invoke(name)
                 trace.append({"tool": name, "called": True})
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(output, default=str)[:4000]})
+    # Registered evidence is what the reviewer submitted to answer substantiation claims: when a card needs it,
+    # the comparison is not left to the model's choice (it skipped the tool in 2 of 4 runs with evidence present).
+    if available["structure_evidence"] and "structure_evidence" not in called and \
+            any("substantiation" in f.get("requiredChecks", []) for f in state["findings"]):
+        called.append("structure_evidence")
+        await invoke("structure_evidence")
+        trace.append({"tool": "structure_evidence", "called": True, "required": True})
     for name, usable in available.items():
         if usable and name not in called:
             trace.append({"tool": name, "called": False})
@@ -714,7 +721,9 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
 
     async def checks(state):
         result = state["result"]
-        evidence_count = len([a for a in request.assets if a.role == "evidence"]) if request else 0
+        # Evidence uploaded with this review and evidence registered on the product (read before submission).
+        evidence_count = (len([a for a in request.assets if a.role == "evidence"])
+                          + int(getattr(request, "productEvidenceCount", 0) or 0)) if request else 0
         evidence, matches, warnings = dict(result["evidence"]), {}, []
         if evidence.get("documents") and provider.client:
             # 증빙마다 시험 요약을 만들고, 실증이 필요한 주장과 한 번에 대조한다(evidence.py).
@@ -728,10 +737,12 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         out = await cross_checks(result["findings"], product=state["product"], evidence=evidence,
                                  evidence_count=evidence_count, ad_text="\n".join(t["text"] for t in state["texts"]),
                                  provider=provider, review_date=datetime.now(timezone.utc).date().isoformat(),
-                                 matches=matches)
+                                 matches=matches, patents=result.get("patents"))
         out["warnings"] = out["warnings"] + warnings
         result = {**result, "evidence": evidence}
-        return {"result": {**result, "findings": out["findings"], "checksSummary": out["summary"],
+        kept, resolved = resolved_by_evidence(out["findings"])
+        return {"result": {**result, "findings": kept, "checksSummary": out["summary"],
+                           "dismissedFindings": result.get("dismissedFindings", []) + resolved,
                            "functionalReports": out.get("functionalReports"),
                            "warnings": list(dict.fromkeys(result["warnings"] + out["warnings"]))}}
 
