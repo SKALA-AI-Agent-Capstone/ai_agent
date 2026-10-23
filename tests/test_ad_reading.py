@@ -378,3 +378,9 @@ def test_a_certificate_gets_back_the_title_the_vision_read_dropped():
              for x, x0 in (("특", 20), ("허", 60), ("증", 100))]
     [merged] = ad_reading.merge_certificate(t, [cert], title)
     assert merged["segments"][0] == "특허증" and merged["text"].startswith("특허증 특허 제 0440357 호")
+
+
+def test_the_issuing_office_under_a_certificate_is_part_of_it():
+    assert ad_reading.certificate_field("특허청")
+    assert ad_reading.certificate_field("특허청 COMMISSION OF THE KOREAN INTELLECTUAL PROPERTY OFFICE")
+    assert not ad_reading.certificate_field("볼꺼짐 탄력섬유재생!")
