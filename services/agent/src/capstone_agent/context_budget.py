@@ -35,7 +35,7 @@ PARSE_OUTPUT_BUDGETS = {
     "BasisCheck": 2500,
     "EvidenceSummary": 1200,
     "ClaimMatches": 3000,
-    "AdCopy": 4000,
+    "AdCopy": 5500,
     "IngredientMentions": 1200,
     "RewriteDraft": 1000,
     "RewriteVerification": 1000,

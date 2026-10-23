@@ -37,11 +37,11 @@ async def test_reads_ad_copy_in_groups_and_leaves_product_label_text_out(monkeyp
             seen["images"] = kwargs["image"]
             seen["text"] = kwargs["text"]
             assert schema is AdCopy
-            return AdCopy(on_product_text=["Pyunkang Yul"], groups=[
-                {"role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box_numbers": [2], "box": [40, 60, 800, 150]},
-                {"role": "claim", "segments": ["Pyunkang Yul"], "labels": [], "box_numbers": [], "box": []},  # model repeated the label: code removes it
-                {"role": "condition", "segments": ["*연구 기간 : 2025.02.24~03.14", "20명 대상"], "labels": [], "box_numbers": [3], "box": [50, 800, 900, 900]},
-                {"role": "result", "segments": ["12.08%", "눈가 주름 감소"], "labels": ["사용 전", "사용 후"], "box_numbers": [9], "box": [0, 0, 1, 1]}])  # too small to be a box
+            return AdCopy(layout=[], on_product_text=["Pyunkang Yul"], groups=[
+                {"kind": "copy", "role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box_numbers": [2], "box": [40, 60, 800, 150]},
+                {"kind": "copy", "role": "claim", "segments": ["Pyunkang Yul"], "labels": [], "box_numbers": [], "box": []},  # model repeated the label: code removes it
+                {"kind": "footnote", "role": "condition", "segments": ["*연구 기간 : 2025.02.24~03.14", "20명 대상"], "labels": [], "box_numbers": [3], "box": [50, 800, 900, 900]},
+                {"kind": "table", "role": "result", "segments": ["12.08%", "눈가 주름 감소"], "labels": ["사용 전", "사용 후"], "box_numbers": [9], "box": [0, 0, 1, 1]}])  # too small to be a box
 
     blocks, warnings = await read_tile(FakeProvider(), t)
     assert [(b["role"], b["text"]) for b in blocks] == [
@@ -119,11 +119,11 @@ async def test_recall_pass_reads_ocr_lines_the_first_read_skipped(monkeypatch):
         async def parse(self, prompt, schema, **kwargs):
             calls.append(kwargs["text"])
             if len(calls) == 1:  # the first read skips the small footnote
-                return AdCopy(on_product_text=[], groups=[{"role": "claim", "segments": ["2주 안에 개선"], "labels": [],
+                return AdCopy(layout=[], on_product_text=[], groups=[{"kind": "copy", "role": "claim", "segments": ["2주 안에 개선"], "labels": [],
                                                           "box_numbers": [1], "box": []}])
-            return AdCopy(on_product_text=[], groups=[
-                {"role": "condition", "segments": ["*연구기관: 피부과학연구소"], "labels": [], "box_numbers": [1], "box": []},
-                {"role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box_numbers": [], "box": []}])  # not anchored
+            return AdCopy(layout=[], on_product_text=[], groups=[
+                {"kind": "footnote", "role": "condition", "segments": ["*연구기관: 피부과학연구소"], "labels": [], "box_numbers": [1], "box": []},
+                {"kind": "copy", "role": "claim", "segments": ["2주 안에 개선"], "labels": [], "box_numbers": [], "box": []}])  # not anchored
 
     blocks, warnings = await read_tile(Provider(), t)
     assert len(calls) == 2 and "1: x 20~300, y 500~530" in calls[1] and "y 40~70" not in calls[1]
@@ -152,9 +152,9 @@ async def test_paddle_read_that_disagrees_is_reread_and_follows_the_ocr_letters(
         async def parse(self, prompt, schema, **kwargs):
             asked.append(schema.__name__)
             if schema is AdCopy:
-                return AdCopy(on_product_text=[], groups=[
-                    {"role": "claim", "segments": ["7종 피부 노화 증후"], "labels": [], "box_numbers": [1], "box": []},
-                    {"role": "result", "segments": ["탄성 복원 63.91% 개선"], "labels": [], "box_numbers": [2], "box": []}])
+                return AdCopy(layout=[], on_product_text=[], groups=[
+                    {"kind": "copy", "role": "claim", "segments": ["7종 피부 노화 증후"], "labels": [], "box_numbers": [1], "box": []},
+                    {"kind": "table", "role": "result", "segments": ["탄성 복원 63.91% 개선"], "labels": [], "box_numbers": [2], "box": []}])
             assert schema is ad_reading.Reread and isinstance(kwargs["image"], str)  # one enlarged crop
             return ad_reading.Reread(lines=["7종 피부 노화 징후"])
 
@@ -176,8 +176,8 @@ async def test_a_number_the_reread_cannot_settle_is_left_for_the_reviewer(monkey
 
         async def parse(self, prompt, schema, **kwargs):
             if schema is AdCopy:
-                return AdCopy(on_product_text=[], groups=[
-                    {"role": "result", "segments": ["탄성 복원 68.91% 개선"], "labels": [], "box_numbers": [1], "box": []}])
+                return AdCopy(layout=[], on_product_text=[], groups=[
+                    {"kind": "table", "role": "result", "segments": ["탄성 복원 68.91% 개선"], "labels": [], "box_numbers": [1], "box": []}])
             return ad_reading.Reread(lines=["탄성 복원 68.91% 개선"])
 
     [block], _ = await read_tile(Provider(), t)
@@ -222,8 +222,8 @@ async def test_a_reread_that_repeats_the_vision_text_confirms_it(monkeypatch):
 
         async def parse(self, prompt, schema, **kwargs):
             if schema is AdCopy:
-                return AdCopy(on_product_text=[], groups=[
-                    {"role": "condition", "segments": ["색이 옅어질 수 있으나"], "labels": [], "box_numbers": [1], "box": []}])
+                return AdCopy(layout=[], on_product_text=[], groups=[
+                    {"kind": "footnote", "role": "condition", "segments": ["색이 옅어질 수 있으나"], "labels": [], "box_numbers": [1], "box": []}])
             return ad_reading.Reread(lines=["색이 옅어질 수 있으나"])
 
     [block], _ = await read_tile(Provider(), t)
@@ -236,22 +236,26 @@ def test_one_letter_lines_do_not_join_a_group():
     assert [l["text"] for l in hits] == ["20층 보습 20.48% 개선"]
 
 
-async def test_a_confident_ocr_line_is_not_overruled_by_two_matching_vision_reads(monkeypatch):
+async def test_a_very_confident_ocr_line_corrects_a_letter_two_vision_reads_got_wrong(monkeypatch):
     t = tile()
     monkeypatch.setattr(ad_reading.paddle_ocr, "enabled", lambda: True)
-    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines", lambda tile: paddle_fake(tile, [("7종 피부 노화 징후", 40)]))
 
     class Provider:
         client = True
 
         async def parse(self, prompt, schema, **kwargs):
             if schema is AdCopy:
-                return AdCopy(on_product_text=[], groups=[
-                    {"role": "claim", "segments": ["7종 피부 노화 전후"], "labels": [], "box_numbers": [1], "box": []}])
+                return AdCopy(layout=[], on_product_text=[], groups=[
+                    {"kind": "copy", "role": "claim", "segments": ["7종 피부 노화 전후"], "labels": [], "box_numbers": [1], "box": []}])
             return ad_reading.Reread(lines=["7종 피부 노화 전후"])  # the reread repeats the plausible rewrite
 
+    # The OCR's letters win only when it is very sure of the line (>= 95); spacing stays the vision's.
+    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines", lambda tile: paddle_fake(tile, [("7종피부노화징후", 40)], 100.0))
     [block], _ = await read_tile(Provider(), t)
-    assert block["readCheck"]["status"] == "needs_review" and block["readCheck"]["ocr"] == "7종 피부 노화 징후"
+    assert block["text"] == "7종 피부 노화 징후" and block["readCheck"]["status"] == "corrected_by_ocr"
+    monkeypatch.setattr(ad_reading.paddle_ocr, "paddle_lines", lambda tile: paddle_fake(tile, [("7종피부노화징후", 40)], 92.6))
+    [block], _ = await read_tile(Provider(), t)
+    assert block["text"] == "7종 피부 노화 전후" and block["readCheck"]["status"] == "needs_review"
 
 
 async def test_a_patent_number_in_the_image_survives_when_the_vision_read_leaves_the_certificate_out(monkeypatch):
@@ -266,8 +270,8 @@ async def test_a_patent_number_in_the_image_survives_when_the_vision_read_leaves
         client = True
 
         async def parse(self, prompt, schema, **kwargs):
-            return AdCopy(on_product_text=[], groups=[
-                {"role": "claim", "segments": ["불꺼짐 탄력섬유재생!"], "labels": [], "box_numbers": [2], "box": []}])
+            return AdCopy(layout=[], on_product_text=[], groups=[
+                {"kind": "copy", "role": "claim", "segments": ["불꺼짐 탄력섬유재생!"], "labels": [], "box_numbers": [2], "box": []}])
 
     blocks, _ = await read_tile(Provider(), t)
     certificate = [b for b in blocks if b.get("documentContext") == "patent_certificate"]
@@ -302,3 +306,75 @@ def test_a_bare_number_read_by_the_vision_does_not_hide_the_certificate_label():
     [block] = ad_reading.certificate_blocks(t, [line("특", 20, 40), line("허 제", 70, 120), line("0440357호", 200, 300)], [bare])
     assert block["text"] == "특허 제 0440357 호"
     assert ad_reading.certificate_blocks(t, [line("특허 제 0440357 호", 20, 300)], [{"text": "특허 제 0440357 호"}]) == []
+
+
+def test_letters_spread_out_by_design_are_joined_into_the_word():
+    assert ad_reading.join_spaced("특 허 증") == "특허증"
+    assert ad_reading.join_spaced("출 원 일 2001년 10월 25일") == "출원일 2001년 10월 25일"
+    assert ad_reading.join_spaced("눈가 주름 12.08% 개선") == "눈가 주름 12.08% 개선"
+
+
+def test_ocr_letters_swap_letters_only_never_figures():
+    assert ad_reading.ocr_letters("특 허 중", "특허증") == "특 허 증"
+    assert ad_reading.ocr_letters("탄성 복원 68.91% 개선", "탄성 복원 63.91% 개선") is None
+    assert ad_reading.ocr_letters("팔자 주름 9.83% 개선", "3 팔자 주름 9.83% 개선") is None  # nothing to swap
+    assert ad_reading.ocr_letters("화장품 책임판매업자", "책임판매업자") is None  # a dropped word is not a swap
+
+
+async def test_a_certificate_is_one_context_unit_and_its_number_reaches_the_patent_lookup(monkeypatch):
+    from capstone_agent.patent_certificate import patent_numbers
+    t = tile()
+    monkeypatch.setattr(ad_reading, "local_ocr", tesseract_lines)
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            return AdCopy(layout=["특허증", "광고 제목"], on_product_text=[], groups=[
+                {"kind": "certificate", "role": "claim", "labels": [], "box_numbers": [], "box": [],
+                 "segments": ["특 허 증", "특허 제 0440357 호", "출원번호 제 2001-0065893 호", "출원일 2001년 10월 25일", "등록일 2004년 07월 05일"]},
+                {"kind": "copy", "role": "claim", "segments": ["볼꺼짐 탄력섬유재생!"], "labels": [], "box_numbers": [], "box": []}])
+
+    blocks, _ = await read_tile(Provider(), t)
+    certificate, headline = blocks[0], blocks[1]
+    assert certificate["kind"] == "certificate" and certificate["role"] == "condition"
+    assert certificate["documentContext"] == "patent_certificate" and certificate["text"].startswith("특허증 특허 제 0440357 호")
+    assert headline["role"] == "claim" and "documentContext" not in headline
+    assert patent_numbers(certificate["text"]) == ["10-0440357"]
+
+
+async def test_a_certificate_split_into_field_blocks_is_put_back_together(monkeypatch):
+    t = tile()
+    monkeypatch.setattr(ad_reading, "local_ocr", tesseract_lines)
+
+    class Provider:
+        client = True
+
+        async def parse(self, prompt, schema, **kwargs):
+            def g(kind, text):
+                return {"kind": kind, "role": "claim", "segments": [text], "labels": [], "box_numbers": [], "box": []}
+            return AdCopy(layout=[], on_product_text=[], groups=[
+                g("copy", "특허증"), g("copy", "볼꺼짐 탄력섬유재생!"), g("footnote", "특허 제 0440357 호"),
+                g("footnote", "출원번호 제 2001-0065893 호"), g("footnote", "출원일 2001년 10월 25일")])
+
+    blocks, _ = await read_tile(Provider(), t)
+    assert [b["text"] for b in blocks] == ["특허증 특허 제 0440357 호 출원번호 제 2001-0065893 호 출원일 2001년 10월 25일",
+                                          "볼꺼짐 탄력섬유재생!"]
+    assert blocks[0]["kind"] == "certificate" and blocks[0]["documentContext"] == "patent_certificate"
+
+
+def test_a_confident_line_corrects_its_own_part_of_the_group():
+    fixed = ad_reading.ocr_letters("임상으로 검증된 7종 피부 노화 정후 개선 효과", "7종피부노화징후", partial=True)
+    assert fixed == "임상으로 검증된 7종 피부 노화 징후 개선 효과"
+
+
+def test_a_certificate_gets_back_the_title_the_vision_read_dropped():
+    t = tile()
+    width, height = t.source_size
+    loc = t.location(precise_box=[20/width, 200/height, 300/width, 230/height], method="PADDLE_OCR")
+    cert = {"id": "c", "text": "특허 제 0440357 호 출원일 2001년 10월 25일", "segments": ["특허 제 0440357 호", "출원일 2001년 10월 25일"],
+            "kind": "certificate", "role": "condition", "labels": [], "words": [], "location": loc}
+    title = [{"id": x, "text": x, "words": [], "location": t.location(precise_box=[x0/width, 100/height, (x0+20)/width, 130/height], method="PADDLE_OCR")}
+             for x, x0 in (("특", 20), ("허", 60), ("증", 100))]
+    [merged] = ad_reading.merge_certificate(t, [cert], title)
+    assert merged["segments"][0] == "특허증" and merged["text"].startswith("특허증 특허 제 0440357 호")

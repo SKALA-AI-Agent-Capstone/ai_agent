@@ -28,6 +28,8 @@ OCR_SLOTS = asyncio.Semaphore(int(os.getenv("OCR_CONCURRENCY", "3")))
 
 
 class Group(BaseModel):
+    # A unit a person reads as one: ad copy, one document (certificate), one footnote, one row of a figure list.
+    kind: Literal["copy", "certificate", "footnote", "table"]
     role: Literal["claim", "condition", "result"]
     segments: list[str]
     labels: list[str]
@@ -40,7 +42,18 @@ class Group(BaseModel):
 class AdCopy(BaseModel):
     # Written first so the model decides what to leave out before it writes the copy.
     on_product_text: list[str]
+    # The units of the section, named before any is written out, so far-apart fields of one document are
+    # planned as one unit instead of being grouped line by line.
+    layout: list[str]
     groups: list[Group]
+
+
+ROLE_OF_KIND = {"copy": "claim", "table": "result", "footnote": "condition", "certificate": "condition"}
+
+
+def join_spaced(text: str) -> str:
+    """Letters spread out by design ('특 허 증') become the word they spell ('특허증')."""
+    return re.sub(r"(?<![가-힣])[가-힣](?: [가-힣]){2,}(?![가-힣])", lambda m: m.group(0).replace(" ", ""), text or "")
 
 
 def norm(text: str) -> str:
@@ -172,7 +185,7 @@ async def read_copy(provider, tile: Tile, lines: list[dict], note: str = "") -> 
 def copy_groups(reading: AdCopy) -> list[tuple]:
     groups = []
     for n, group in enumerate(reading.groups):
-        segments = strip_product([x.strip() for x in group.segments if x.strip()], reading.on_product_text)
+        segments = strip_product([join_spaced(x.strip()) for x in group.segments if x.strip()], reading.on_product_text)
         if segments:
             groups.append((n, group, segments, " ".join(segments)))
     return groups
@@ -205,9 +218,14 @@ async def snap_to_ocr(tile: Tile, text: str, model_box: list[float]) -> list[dic
 def block(tile: Tile, key: str, group: Group, segments: list[str], text: str, hits: list[dict], engine="TESSERACT",
           check=None) -> dict:
     box, method = merge_boxes(union_box(hits), vision_box(tile, group.box))
-    out = {"id": f"{tile.id}:copy:{key}", "text": text, "segments": segments, "role": group.role, "labels": group.labels,
+    out = {"id": f"{tile.id}:copy:{key}", "text": text, "segments": segments, "kind": group.kind,
+           "role": ROLE_OF_KIND.get(group.kind, group.role), "labels": group.labels,
            "words": [w for line in hits for w in line.get("words", [])],
            "location": tile.location(precise_box=box, method=(engine if method == "TESSERACT" else method) or "VISION_COPY_REGION")}
+    if group.kind == "certificate":
+        # One document's fields travel as one context block: the patent lookup reads its number, and neither
+        # claim review nor the rule sweep treats its dates and numbers as claims.
+        out["documentContext"] = "patent_certificate" if "특허" in text else "certificate"
     if check:
         out["readCheck"] = check
     return out
@@ -256,7 +274,32 @@ async def reread(provider, tile: Tile, hits: list[dict]) -> str:
     crop = crop.resize((crop.width * 2, crop.height * 2))
     out = await provider.parse(instruction("literal_reread"), Reread, image=data_url(crop),
                                text="잘린 영역의 글자를 한 줄씩 그대로 옮긴다.")
-    return " ".join(line.strip() for line in out.lines if line.strip())
+    return join_spaced(" ".join(line.strip() for line in out.lines if line.strip()))
+
+
+def ocr_letters(vision: str, ocr: str, limit: int = 2, partial: bool = False) -> str | None:
+    """The vision text with a few of its letters replaced by the OCR's, its spacing kept. Only one-for-one letter
+    swaps ('특허중' against '특허증'); no letter added or dropped, never a digit, so a figure is not touched.
+    Extra OCR text before or after the read (a list number, a neighbouring line) is ignored."""
+    keep = [i for i, ch in enumerate(vision) if norm(ch)]
+    a, b = "".join(vision[i] for i in keep).lower(), norm(ocr)
+    if not a or a == b:
+        return None
+    out, swaps = list(vision), 0
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == "equal" or (tag == "insert" and i1 in (0, len(a))):
+            continue
+        if partial and tag == "delete" and j1 in (0, len(b)):
+            continue  # the OCR line covers only part of the group
+        if tag != "replace" or i2 - i1 != j2 - j1:
+            return None
+        for k in range(i2 - i1):
+            old, new = a[i1 + k], b[j1 + k]
+            if old.isdigit() or new.isdigit() or "%" in (old, new) or "." in (old, new):
+                return None
+            out[keep[i1 + k]] = new
+            swaps += 1
+    return "".join(out) if 0 < swaps <= limit else None
 
 
 async def check_reading(provider, tile: Tile, text: str, hits: list[dict]) -> tuple[str, dict | None]:
@@ -272,13 +315,30 @@ async def check_reading(provider, tile: Tile, text: str, hits: list[dict]) -> tu
     except Exception:
         return text, {"status": "needs_review", "vision": text, "ocr": ocr}
     if again and not disagrees(again, ocr) and disagrees(text, again):
-        return again, {"status": "corrected", "vision": text, "ocr": ocr}
+        # The reread sides with the OCR. Keep the first read's spacing when only letters differ.
+        fixed = ocr_letters(text, ocr)
+        return (fixed if fixed and not disagrees(fixed, ocr) else again), {"status": "corrected", "vision": text, "ocr": ocr}
     sure = sum(h.get("ocrConfidence", 0) for h in hits) / len(hits) >= 90
     if again and not disagrees(text, again) and not figure_conflict(text, ocr) and not sure:
         # Two vision reads agree and the OCR is unsure of its own letters (small gray text, '열어질' for '옅어질').
         # A confident OCR line that differs is never overruled: a vision model repeats the same plausible
         # rewrite twice, so both readings go to the reviewer. Figures always do.
         return text, {"status": "confirmed", "ocr": ocr}
+    fixed = text
+    for h in hits:
+        # Each very confident OCR line corrects only the part of the group it covers, so one unsure line
+        # ('개선 효과' at 93) does not block the letter another line is sure of ('징후' at 100).
+        if h.get("ocrConfidence", 0) >= 95:
+            fixed = ocr_letters(fixed, h["text"], partial=True) or fixed
+    if fixed != text and not figure_conflict(fixed, ocr) and letters_apart(fixed, ocr) < letters_apart(text, ocr):
+        return fixed, {"status": "corrected_by_ocr", "vision": text, "ocr": ocr, "reread": again}
+    if min(h.get("ocrConfidence", 0) for h in hits) >= 95:
+        # A very confident OCR line that differs from two vision reads by a letter or two ('특허중' for '특허증'):
+        # take its letters and keep the vision spacing, which the OCR does not give. Measured on the two test
+        # ads: the OCR lines it was right on scored 96.5 to 100, the one it was wrong on ('열어질') 92.6.
+        fixed = ocr_letters(text, ocr)
+        if fixed and not disagrees(fixed, ocr):
+            return fixed, {"status": "corrected_by_ocr", "vision": text, "ocr": ocr, "reread": again}
     return text, {"status": "needs_review", "vision": text, "ocr": ocr, "reread": again}
 
 
@@ -327,6 +387,48 @@ def same_row(lines: list[dict]) -> list[list[dict]]:
         else:
             rows.append([line])
     return [sorted(row, key=lambda l: l["location"]["bbox"][0]) for row in rows]
+
+
+CERTIFICATE_FIELD = re.compile(r"특허증|특허\s*제|허\s*제\s*\d{7}|출원\s*번호|출원일|등록일|공개일|등록번호|"
+                               r"제\s*\d{4}-\d{7}\s*호|\d{7}\s*호|\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일")
+
+
+def certificate_field(text: str) -> bool:
+    """The block is a field of a certificate and nothing else ('출원일 2001년 10월 25일', '특허 제 0440357 호')."""
+    rest = norm(CERTIFICATE_FIELD.sub("", text))
+    return bool(CERTIFICATE_FIELD.search(text)) and len(rest) <= 4
+
+
+def merge_certificate(tile: Tile, blocks: list[dict], lines: list[dict] = ()) -> list[dict]:
+    """When the vision read split one certificate into field blocks anyway, put them back into one unit, and give
+    it back its title when the OCR saw '특허증' but the vision read dropped it (a short title is easy to skip)."""
+    fields = [b for b in blocks if b.get("kind") == "certificate" or certificate_field(b["text"])]
+    if not any(re.search(r"특허증|특허\s*제|허\s*제", b["text"]) for b in fields):
+        return blocks
+    titled = any("특허증" in norm(b["text"]) for b in fields)
+    title_line = next((row for row in same_row([l for l in lines if l["location"].get("bbox")])
+                       if norm("".join(l["text"] for l in row)) == "특허증"), None)
+    if not titled and title_line:
+        box = [min(l["location"]["bbox"][0] for l in title_line), min(l["location"]["bbox"][1] for l in title_line),
+               max(l["location"]["bbox"][2] for l in title_line), max(l["location"]["bbox"][3] for l in title_line)]
+        fields.append({"id": f"{tile.id}:copy:certificate-title", "text": "특허증", "segments": ["특허증"], "kind": "certificate",
+                       "role": "condition", "labels": [], "words": [], "location": tile.location(precise_box=box, method="PADDLE_OCR")})
+    if len(fields) < 2:
+        return blocks
+    fields.sort(key=lambda b: ((b["location"].get("bbox") or b["location"]["region"])[1]))
+    segments = [s for b in fields for s in b["segments"]]
+    boxes = [b["location"]["bbox"] for b in fields if b["location"].get("bbox")]
+    box = [min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes)] if boxes else None
+    merged = {**fields[0], "id": f"{tile.id}:copy:certificate", "text": " ".join(segments), "segments": segments,
+              "kind": "certificate", "role": "condition", "documentContext": "patent_certificate",
+              "words": [w for b in fields for w in b.get("words", [])],
+              "location": tile.location(precise_box=box, method=fields[0]["location"].get("coordinateSource", "PADDLE_OCR"))}
+    merged.pop("readCheck", None)
+    present = [b for b in fields if b in blocks]
+    first = blocks.index(min(present, key=blocks.index)) if present else 0
+    out = [b for b in blocks if b not in fields]
+    out.insert(min(first, len(out)), merged)
+    return out
 
 
 def certificate_blocks(tile: Tile, lines: list[dict], blocks: list[dict]) -> list[dict]:
@@ -388,4 +490,4 @@ async def read_tile(provider, tile: Tile) -> tuple[list[dict], list[str]]:
                     blocks.append(block(tile, f"r{n}", group, segments, text, hits, engine))
         except Exception:
             warnings.append(f"{tile.id}:RECALL_PASS_FAILED")
-    return blocks + certificate_blocks(tile, lines, blocks), warnings
+    return merge_certificate(tile, blocks + certificate_blocks(tile, lines, blocks), lines), warnings
