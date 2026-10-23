@@ -17,6 +17,8 @@ from .observability import run_config, trace_headers, trace_id
 from .review_models import RunRequest, ResumeRequest, RewriteRequest, VerifyRewriteRequest
 from .review_engine import Provider, prepare_assets, build_graph, progress, rewrite_phrase, verify_rewrite, RewriteRejected
 from .regulations import source_document
+from .evidence_reading import EvidenceParseRequest, parse_stored_evidence
+from capstone_shared.reading import READER_VERSION
 from .tools import McpTools
 from .resume import resume_thread, thread_lock
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -150,6 +152,23 @@ def create_app() -> FastAPI:
         if document is None:
             raise HTTPException(status_code=404,detail="REGULATION_DOCUMENT_NOT_FOUND")
         return document
+
+    @app.get("/internal/evidence/reader", dependencies=[Depends(require_internal)])
+    async def evidence_reader() -> dict:
+        return {"readerVersion": READER_VERSION}
+
+    @app.post("/internal/evidence/parse", dependencies=[Depends(require_internal)])
+    async def parse_evidence_file(request: EvidenceParseRequest) -> dict:
+        try:
+            return await parse_stored_evidence(request)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error) or "EVIDENCE_UNREADABLE") from None
+        except httpx.HTTPStatusError:
+            raise HTTPException(status_code=404, detail="EVIDENCE_FILE_NOT_FOUND") from None
+        except TimeoutError:
+            raise HTTPException(status_code=504, detail="EVIDENCE_READ_TIMEOUT") from None
+        except Exception:
+            raise HTTPException(status_code=500, detail="EVIDENCE_READ_FAILED") from None
 
     @app.post("/internal/runs/delete", dependencies=[Depends(require_internal)])
     async def delete_runs(request: ResumeRequest) -> dict:
