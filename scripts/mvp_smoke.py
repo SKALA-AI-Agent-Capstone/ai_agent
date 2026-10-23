@@ -115,7 +115,7 @@ def main(require_queue=False):
                 return doc
             time.sleep(1)
         raise AssertionError("Review did not finish within synthetic smoke timeout")
-    def verify_queue(no,kind="run"):
+    def verify_queue(no):
         if not require_queue:
             return
         deadline=time.monotonic()+15
@@ -126,22 +126,23 @@ def main(require_queue=False):
                     password=os.environ["APP_DB_PASSWORD"],connect_timeout=5) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT status,attempts,last_error FROM app.review_jobs "
-                        "WHERE review_id=%s::uuid AND version_no=%s AND kind=%s",(rid,no,kind))
+                        "WHERE review_id=%s::uuid AND version_no=%s",(rid,no))
                     row=cursor.fetchone()
             if row and row[0]=="done":
                 assert row[1]==1 and row[2] is None,(no,row)
                 return
             time.sleep(1)
-        raise AssertionError(f"Queue {kind} job for version {no} did not finish: {row}")
-    def resume_jobs():
-        """2026-10-22 review approval was removed, so the Backend must never queue an Agent resume."""
+        raise AssertionError(f"Queue run job for version {no} did not finish: {row}")
+    def queued_jobs():
+        """Review approval and Agent resume were removed (2026-10-22, Backend V24 dropped the job kind),
+        so a review has exactly one analysis job and nothing else is queued after it."""
         if not require_queue:
-            return 0
+            return 1
         with psycopg.connect(host="127.0.0.1",port=int(os.getenv("POSTGRES_PORT","55432")),
                 dbname=os.getenv("POSTGRES_DB","beauty_capstone"),user="app_user",
                 password=os.environ["APP_DB_PASSWORD"],connect_timeout=5) as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT count(*) FROM app.review_jobs WHERE review_id=%s::uuid AND kind='resume'",(rid,))
+                cursor.execute("SELECT count(*) FROM app.review_jobs WHERE review_id=%s::uuid",(rid,))
                 return cursor.fetchone()[0]
     try:
         review=wait(1);version=review["versions"][-1];result=version["result"]
@@ -166,7 +167,7 @@ def main(require_queue=False):
         assert "approval" not in detail["versions"][-1],detail["versions"][-1].keys()
         assert call("POST",f"/reviews/{rid}/decision",reviewer,json={"versionNo":1,"state":"approved","comment":"x"}).status_code==404
         assert call("POST",f"/reviews/{rid}/re-review",author).status_code in {404,405}
-        assert resume_jobs()==0,"Backend queued an Agent resume after approval was removed"
+        assert queued_jobs()==1,"Backend queued another job after the analysis run"
         assert balance()==2*review_cost,"Reading the report changed the settled credits"
         checks.append("tenant isolation, report without review approval, removed decision and re-review endpoints")
         sources = call("GET", "/reference-sources", token).json()["sources"]
@@ -180,7 +181,7 @@ def main(require_queue=False):
     assert call("GET",f"/reviews/{rid}",author).status_code==404
     checks.append("review deletion")
     if require_queue:
-        checks.append("RabbitMQ-backed run job reached done once and no resume job was queued")
+        checks.append("RabbitMQ-backed run job reached done once and no other job was queued")
     print(json.dumps({"checks":checks,"paid_model_calls":0,"customer_files_used":0},ensure_ascii=False,indent=2))
 
 

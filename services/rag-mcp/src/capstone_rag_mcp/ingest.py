@@ -17,7 +17,9 @@ import psycopg
 from .embedding import Embedder
 from .lawapi import LawApiDocument
 from .links import LEGACY_KEYS
-from .pdf_vision import AUTO_TRANSCRIPTION
+from capstone_shared.reading import READER_VERSION
+
+from .pdf_vision import AUTO_OCR, AUTO_OCR_UNCHECKED, AUTO_TRANSCRIPTION
 
 ISSUERS = {"mfds": "식품의약품안전처", "kcia": "대한화장품협회", "law": "법제처 국가법령정보센터"}
 
@@ -164,6 +166,9 @@ def from_pdf(source: dict, path: Path, *, pages: list[str] | None = None,
     # Reviewed markdown can change while the PDF stays the same; its text must give a new version.
     derived = "\n".join(selected_pages).encode("utf-8") if curated or any(
         AUTO_TRANSCRIPTION in p for p in selected_pages) else b""
+    # OCR text depends on the reader: a new reader version gives the OCR pages a new document version.
+    if any(AUTO_OCR in p or AUTO_OCR_UNCHECKED in p for p in selected_pages):
+        derived += "\n".join(selected_pages).encode("utf-8") + READER_VERSION.encode("ascii")
     if extra_chunks:
         derived += json.dumps(extra_chunks, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return Document(

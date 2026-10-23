@@ -11,6 +11,10 @@ from capstone_shared.reading import image_ratio, read_pdf
 AUTO_TRANSCRIPTION = "[이미지 자동 전사 - 원본 대조 필요]"
 # Model read the image, re-checked it against the image and passed deterministic checks; no human review.
 AUTO_VERIFIED = "[이미지 자동 전사 - 모델 원본 재대조 통과, 사람 검수 전]"
+# PaddleOCR read the page and a vision model agreed on its figures; no human has reviewed it.
+AUTO_OCR = "[이미지 자동 OCR - 숫자 대조 통과, 사람 검수 전]"
+# Same, but the vision model was not available or out of budget, so the figures were not compared.
+AUTO_OCR_UNCHECKED = "[이미지 자동 OCR - 숫자 대조 못 함, 사람 검수 전]"
 
 
 class PdfVisionError(RuntimeError):
@@ -98,39 +102,6 @@ def transcribe_page(image_url: str | list[str], native_text: str, *, client=None
     if parsed is None or parsed.uncertain or len(parsed.text.strip()) < 20:
         raise PdfVisionError("RAG_PDF_VISION_REVIEW_REQUIRED")
     return parsed.text.strip()
-
-
-def merge_page_text(native_text: str, visual_text: str) -> str:
-    native_lines = {line.strip() for line in native_text.splitlines() if line.strip()}
-    new_lines = [line for line in visual_text.splitlines() if line.strip() not in native_lines]
-    if not any(line.strip() for line in new_lines):
-        raise PdfVisionError("RAG_PDF_VISION_NO_NEW_TEXT")
-    return native_text.rstrip() + f"\n{AUTO_TRANSCRIPTION}\n" + "\n".join(new_lines)
-
-
-def read_pages_for_index(path: Path, *, page_numbers: set[int] | None = None,
-                         transcriber=transcribe_page, renderer=render_page,
-                         retry_renderer=render_page_columns, on_warning=None) -> list[str]:
-    pages = []
-    for index, page in enumerate(read_public_pdf(path).pages):
-        native = page.text
-        if (page_numbers is None or index + 1 in page_numbers) and wants_vision(page.image_ratio, native):
-            try:
-                try:
-                    visual = transcriber(renderer(path, index), native)
-                except PdfVisionError as error:
-                    if str(error) not in ("RAG_PDF_VISION_REVIEW_REQUIRED", "RAG_PDF_VISION_NO_NEW_TEXT"):
-                        raise
-                    visual = transcriber(retry_renderer(path, index), native)
-                native = merge_page_text(native, visual)
-            except Exception as error:
-                if on_warning is not None:
-                    on_warning({"page": index + 1, "reason": str(error) if isinstance(error, PdfVisionError)
-                                else "RAG_PDF_VISION_FAILED"})
-                # A title alone is not a usable citation for the image's table.
-                native = ""
-        pages.append(native)
-    return pages
 
 
 def read_public_pdf(path: Path):
