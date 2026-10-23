@@ -446,6 +446,7 @@ async def test_business_tools_run_without_a_model_key_instead_of_being_skipped(m
 
     class FakeRequest:
         assets = [FakeAsset()]
+        productEvidenceCount = 1  # the product has evidence Spring already holds a read result for
 
     mcp_calls = []
     async def fake_mcp_call(name, arguments, request=None):
@@ -497,6 +498,7 @@ async def test_business_tool_loop_follows_llm_choice_and_guardrail_caps_repeats(
 
     class FakeRequest:
         assets = [FakeAsset()]
+        productEvidenceCount = 1  # the product has evidence Spring already holds a read result for
 
     mcp_calls = []
     async def fake_mcp_call(name, arguments, request=None):

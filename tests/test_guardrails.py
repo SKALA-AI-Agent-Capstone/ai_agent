@@ -69,7 +69,7 @@ async def test_evidence_contact_data_is_masked_before_model_and_storage(monkeypa
             call.model_dump = lambda: {"id": "c1", "type": "function",
                                        "function": {"name": "structure_evidence", "arguments": "{}"}}
             return SimpleNamespace(content="", tool_calls=[call])
-    request = RunRequest(reviewId="r", tenantId="t", versionNo=1, runToken="x"*32, product={},
+    request = RunRequest(reviewId="r", tenantId="t", versionNo=1, runToken="x"*32, product={}, productEvidenceCount=1,
                          assets=[{"id":"e1","name":"report.pdf","role":"evidence"}])
     graph = build_graph([], [], FakeProvider(), InMemorySaver(), request)
     output = await graph.ainvoke({"reviewId":"r","tenantId":"t","versionNo":1,"product":{}},

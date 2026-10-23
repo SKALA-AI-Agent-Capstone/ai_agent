@@ -58,6 +58,12 @@
       "title": "Product",
       "type": "object"
     },
+    "productEvidenceCount": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Productevidencecount",
+      "type": "integer"
+    },
     "assets": {
       "items": {
         "$ref": "#/$defs/AssetRef"

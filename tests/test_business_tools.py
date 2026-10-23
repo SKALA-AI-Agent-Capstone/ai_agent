@@ -27,7 +27,8 @@ async def test_failed_tool_selection_still_runs_relevant_tools(monkeypatch):
         client = True
         async def call_with_tools(self, messages, specs):
             raise RuntimeError("provider unavailable")
-    request = SimpleNamespace(assets=[SimpleNamespace(role="evidence", model_dump=lambda: {"id": "e1", "role": "evidence"})])
+    request = SimpleNamespace(productEvidenceCount=1,
+                              assets=[SimpleNamespace(role="evidence", model_dump=lambda: {"id": "e1", "role": "evidence"})])
     state = {"product": {"name": "합성 크림"}, "texts": [{"text": "주름 개선"}], "findings": [],
              "tenantId": "t", "reviewId": "r"}
     evidence, public, patents, warnings, trace = await select_business_tools(DownProvider(), state, request)
