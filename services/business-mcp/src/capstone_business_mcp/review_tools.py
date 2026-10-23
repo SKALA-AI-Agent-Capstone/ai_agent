@@ -8,7 +8,6 @@ from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 import httpx
-from capstone_shared.documents import prepare_evidence, local_ocr
 from capstone_shared.settings import internal_token, required_env
 
 
@@ -132,35 +131,33 @@ async def patents(numbers):
 
 
 async def structure(tenant_id,review_id,documents,version_no,run_token):
-    """Read submitted evidence for the Agent. Each document keeps its own text so the Agent can summarize it
-    and compare it with the ad's claims; a failure says why (fetch, page limit, parse) instead of one blanket code."""
-    texts,failures,read=[],[],[]
-    async with httpx.AsyncClient(timeout=30) as client:
-        for doc in documents[:10]:
-            try:
-                response=await client.get(required_env("BACKEND_BASE_URL")+f"/internal/reviews/{review_id}/assets/{doc['id']}",
-                    params={"versionNo":version_no},headers={"Authorization":f"Bearer {internal_token()}","X-Run-Token":run_token})
-                response.raise_for_status()
-            except Exception:
-                failures.append({"documentId":doc.get("id"),"name":doc.get("name"),"code":"DOCUMENT_FETCH_FAILED"});continue
-            try:
-                blocks,scans,pages=await asyncio.to_thread(prepare_evidence,response.content,doc)
-            except ValueError as error:
-                failures.append({"documentId":doc.get("id"),"name":doc.get("name"),"code":str(error)});continue
-            except Exception:
-                failures.append({"documentId":doc.get("id"),"name":doc.get("name"),"code":"DOCUMENT_PARSE_FAILED"});continue
-            parts=[b["text"] for b in blocks]
-            for scan in scans:
-                try:parts.extend(line["text"] for line in await asyncio.to_thread(local_ocr,scan))
-                except Exception:failures.append({"documentId":doc["id"],"name":doc.get("name"),"code":"OCR_UNAVAILABLE","page":scan.page})
-            text="\n".join(parts)
-            read.append({"id":doc["id"],"name":doc.get("name"),"docType":doc.get("docType",""),"pages":pages,
-                         "scannedPages":len(scans),"characters":len(text),"text":text[:30000]})
-            texts.append(text)
-    status="extracted" if read and not failures else "partial" if read else "failed"
-    return {"status":status,"text":"\n".join(texts)[:60000],"documents":read,
+    """Evidence for the Agent. Nothing is read here: product evidence is read once when it is registered on the product
+    (Agent /internal/evidence/parse) and Spring serves the stored result. For a report that covers several products only
+    the registered product's pages come back. Pages that could not be read are listed as failures, not hidden."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response=await client.get(required_env("BACKEND_BASE_URL")+f"/internal/reviews/{review_id}/product-evidence",
+                params={"versionNo":version_no},headers={"Authorization":f"Bearer {internal_token()}","X-Run-Token":run_token})
+            response.raise_for_status()
+    except Exception:
+        return {"status":"failed","text":"","documents":[],"failures":[{"code":"PRODUCT_EVIDENCE_FETCH_FAILED"}],
+                "claimTypes":[],"requirements":[],"flags":[],"note":"제품 증빙 읽기 결과를 가져오지 못했습니다."}
+    stored=response.json().get("documents",[])
+    read,failures=[],[]
+    for doc in stored:
+        if doc.get("productNotInReport"):
+            failures.append({"documentId":doc["id"],"name":doc.get("name"),"code":"PRODUCT_NOT_IN_REPORT"});continue
+        for number in doc.get("unreadPages",[]):
+            failures.append({"documentId":doc["id"],"name":doc.get("name"),"code":"OCR_UNAVAILABLE","page":number})
+        text=doc.get("text","")
+        read.append({"id":doc["id"],"name":doc.get("name"),"docType":doc.get("docType",""),"pages":doc.get("pages"),
+                     "characters":len(text),"text":text[:30000],"issuer":doc.get("issuer"),"codes":doc.get("codes",[]),
+                     "version":doc.get("version"),"productPages":doc.get("productPages",[]),"results":doc.get("results",[]),
+                     "readerVersion":doc.get("readerVersion")})
+    status="extracted" if read and not failures else "partial" if read else "not_submitted" if not stored else "failed"
+    return {"status":status,"text":"\n".join(d["text"] for d in read)[:60000],"documents":read,
             "failures":failures,"claimTypes":[],"requirements":[],"flags":[],
-            "note":"본문 추출 결과입니다. 광고 주장과의 대조는 Agent가 따로 합니다."}
+            "note":"제품에 등록된 증빙의 읽기 결과입니다. 광고 주장과의 대조는 Agent가 따로 합니다."}
 
 
 MFDS_LISTS={

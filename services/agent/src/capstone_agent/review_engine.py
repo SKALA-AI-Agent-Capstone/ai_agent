@@ -446,8 +446,8 @@ LOOP_TIMEOUT_SECONDS = 60
 BUSINESS_TOOL_SPECS = [
     {"type": "function", "function": {
         "name": "structure_evidence",
-        "description": "제출된 증빙서류(인증서·전성분표·시험자료 등)를 구조화해서 읽는다. 광고 주장이 수치나 "
-                        "시험 결과, 성분을 말하고 증빙 파일이 실제로 제출됐을 때만 호출한다.",
+        "description": "제품에 등록된 증빙서류(인증서·전성분표·시험자료 등)의 읽기 결과를 가져온다. 광고 주장이 수치나 "
+                        "시험 결과, 성분을 말할 때 호출한다. 증빙은 제품 등록 때 이미 읽혀 있어 여기서 다시 읽지 않는다.",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {
         "name": "verify_functional_approval",
@@ -494,7 +494,8 @@ async def select_business_tools(provider, state, request):
     text = "\n".join(t["text"] for t in state["texts"])
     candidate_numbers = patent_numbers(text)[:10]
     available = {
-        "structure_evidence": bool(documents),
+        # 증빙은 제품에 등록되어 있고, 접수 때 Spring이 읽기가 끝난 증빙의 수를 알려 준다.
+        "structure_evidence": bool(getattr(request, "productEvidenceCount", 0)),
         "verify_functional_approval": bool(product.get("name")),
         "verify_patent": bool(candidate_numbers) or any(f.get("claimType") == "patent" for f in state["findings"]),
     }

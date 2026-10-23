@@ -17,6 +17,7 @@ class RunRequest(BaseModel):
     versionNo: int = Field(ge=1)
     runToken: str = Field(min_length=32, repr=False)
     product: dict
+    productEvidenceCount: int = Field(default=0, ge=0)  # evidence of the product Spring already holds a read result for
     assets: list[AssetRef] = Field(max_length=15)
 
 
