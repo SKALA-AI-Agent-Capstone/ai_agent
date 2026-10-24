@@ -484,6 +484,16 @@ def tool_succeeded(output):
     return True
 
 
+def evidence_total(request) -> int:
+    """Evidence this review can rest on: files sent with the review plus the product's own evidence that Spring already
+    holds a read result for. Counting only the files sent made a product whose evidence was registered once look as if
+    nothing had been submitted (the model skipped the tool, and every figure claim came back 'no evidence')."""
+    if request is None:
+        return 0
+    sent = len([a for a in request.assets if a.role == "evidence"])
+    return sent + int(getattr(request, "productEvidenceCount", 0) or 0)
+
+
 async def select_business_tools(provider, state, request):
     """business 노드의 도구선택 loop. LLM은 findings를 보고 structure_evidence/verify_functional_approval/
     verify_patent 중 관련 있는 것만 고른다 — 매번 조건문으로 다 지나가는 게 아니라 실제로 선택이다.
@@ -507,8 +517,16 @@ async def select_business_tools(provider, state, request):
         "verify_functional_approval": bool(product.get("name")),
         "verify_patent": bool(candidate_numbers) or any(f.get("claimType") == "patent" for f in state["findings"]),
     }
+    # Why a tool did not run, so the review can say "not needed" apart from "nothing to check with".
+    unavailable_reason = {"structure_evidence": "NO_EVIDENCE", "verify_functional_approval": "NO_PRODUCT_NAME",
+                          "verify_patent": "NO_PATENT_CLAIM"}
+
+    def not_available():
+        return [{"tool": name, "called": False, "reason": unavailable_reason[name]}
+                for name, usable in available.items() if not usable]
+
     if not any(available.values()):
-        return evidence, public, patents, warnings, trace
+        return evidence, public, patents, warnings, not_available()
 
     async def invoke(name):
         await emit(request, "tool_started", tool=name)
@@ -544,8 +562,8 @@ async def select_business_tools(provider, state, request):
         for name, usable in available.items():
             if usable:
                 await invoke(name)
-            trace.append({"tool": name, "called": usable})
-        return evidence, public, patents, warnings, trace
+                trace.append({"tool": name, "called": True})
+        return evidence, public, patents, warnings, trace + not_available()
 
     findings_summary = "\n".join(f"- \"{f['phrase']}\" (claimType={f.get('claimType')}): {f['reason']}"
                                  for f in state["findings"]) or "(없음)"
@@ -555,14 +573,16 @@ async def select_business_tools(provider, state, request):
             f"광고에서 추출한 확인 대상 문구:\n{findings_summary}\n\n"
             f"제품명: {product.get('name') or '(없음)'}\n"
             f"기능성 심사·보고번호 입력값: {report or '(없음)'}\n"
-            f"제출된 증빙서류: {len(documents)}건\n"
+            f"제출된 증빙서류: {evidence_total(request)}건 (제품에 등록된 증빙 {int(getattr(request, 'productEvidenceCount', 0) or 0)}건 포함)\n"
             f"광고 문구에서 찾은 특허번호 형식 문자열: {len(candidate_numbers)}건"},
     ]
-    called = []
+    called, limited = [], set()
+    ended, model_note = "MODEL_NOT_NEEDED", ""
     started = time.monotonic()
     for _ in range(MAX_TOOL_CALLS_TOTAL + 1):
         if time.monotonic() - started > LOOP_TIMEOUT_SECONDS:
             warnings.append("TOOL_LOOP_TIMEOUT")
+            ended = "LOOP_TIMEOUT"
             break
         try:
             message = await provider.call_with_tools(messages, BUSINESS_TOOL_SPECS)
@@ -578,6 +598,8 @@ async def select_business_tools(provider, state, request):
             break
         tool_calls = message.tool_calls or []
         if not tool_calls:
+            # The selection prompt asks for a short reason when no more tools are needed; keep it for the review.
+            model_note = (message.content or "").strip()[:300]
             break
         messages.append({"role": "assistant", "content": message.content or "",
                          "tool_calls": [tc.model_dump() for tc in tool_calls]})
@@ -586,6 +608,8 @@ async def select_business_tools(provider, state, request):
             same = sum(1 for c in called if c == name)
             if len(called) >= MAX_TOOL_CALLS_TOTAL or same >= MAX_SAME_TOOL_CALLS or not available.get(name):
                 output = {"skipped": "GUARDRAIL_LIMIT_REACHED" if available.get(name) else "TOOL_NOT_APPLICABLE"}
+                if available.get(name):
+                    limited.add(name)
             else:
                 called.append(name)
                 output = await invoke(name)
@@ -600,8 +624,14 @@ async def select_business_tools(provider, state, request):
         trace.append({"tool": "structure_evidence", "called": True, "required": True})
     for name, usable in available.items():
         if usable and name not in called:
-            trace.append({"tool": name, "called": False})
-    return evidence, public, patents, warnings, trace
+            # Available but not run: the model judged it unnecessary for these cards (no card asked for it, or the
+            # evidence rule above would have run it), or a guardrail or the time limit stopped the loop first.
+            reason = "GUARDRAIL_LIMIT" if name in limited else ended
+            entry = {"tool": name, "called": False, "reason": reason}
+            if reason == "MODEL_NOT_NEEDED" and model_note:
+                entry["note"] = model_note
+            trace.append(entry)
+    return evidence, public, patents, warnings, trace + not_available()
 
 
 def merge_nested(findings):
@@ -730,8 +760,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
     async def checks(state):
         result = state["result"]
         # Evidence uploaded with this review and evidence registered on the product (read before submission).
-        evidence_count = (len([a for a in request.assets if a.role == "evidence"])
-                          + int(getattr(request, "productEvidenceCount", 0) or 0)) if request else 0
+        evidence_count = evidence_total(request)
         evidence, matches, warnings = dict(result["evidence"]), {}, []
         if evidence.get("documents") and provider.client:
             # 증빙마다 시험 요약을 만들고, 실증이 필요한 주장과 한 번에 대조한다(evidence.py).
