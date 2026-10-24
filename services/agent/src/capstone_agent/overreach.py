@@ -7,12 +7,27 @@ the ones a reviewer would drop, with a reason. It runs right after the judgment 
 so a released card costs no basis search, verification, severity or rewrite call. It never adds or rewrites cards.
 """
 import asyncio
+import logging
+import re
 
 from pydantic import BaseModel
 
 from .instructions import instruction
 
+logger = logging.getLogger(__name__)
+
 OVERREACH_BATCH = 12
+# The reviewer may release a card the ad does not really claim, but never one that states what a reviewer must check.
+# The prompt says so too, yet the model released "미백" and "4배 빠른 저분자!" in some runs, and a missed functional
+# or numeric claim costs far more than one extra card. So this is a floor in code, whatever the model answers.
+PROTECTED_TYPES = {"wrinkle", "whitening", "absolute", "patent", "drug"}
+PROTECTED_TEXT = re.compile(
+    r"미백|주름|자외선|탈모|여드름|튼살|염모|체모|아토피"                       # functional effects (심사·보고 대상)
+    r"|\d+(?:[.,]\d+)?\s*(?:%|％|퍼센트|배)"                                  # figures stated as results or comparisons
+    r"|\d+\s*(?:초|분|시간|일|주|개월|회)\s*(?:만에|만으로|후|간|동안)"                # a period or count of use for a result
+    r"|최초|최고|유일|1위|No\.?\s*1|세계|업계|독보|완벽|영구|가장"               # absolute claims and comparisons
+    r"|특허|인증|수상|심사|임상|시험|설문|검증|인체적용|피부과|의사|병원|약국",    # public basis and tests
+    re.IGNORECASE)
 KIND_NAMES = {"copy": "문구", "table": "목록 줄", "footnote": "각주", "certificate": "문서"}
 
 
@@ -40,6 +55,11 @@ def group_by_section(findings: list[dict]) -> list[list[dict]]:
     for f in findings:
         groups.setdefault(tile_of(f), []).append(f)
     return list(groups.values())
+
+
+def protected(card: dict) -> bool:
+    """A card the reviewer must not release: its type or its words say a reviewer has something to check."""
+    return card.get("claimType") in PROTECTED_TYPES or bool(PROTECTED_TEXT.search(card.get("phrase", "")))
 
 
 async def review_overreach(provider, findings: list[dict], texts: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
@@ -77,7 +97,11 @@ async def review_overreach(provider, findings: list[dict], texts: list[dict]) ->
     kept, released = [], []
     for f in findings:
         v = verdicts.get(f["id"])
-        if v is not None and v.release:
+        if v is not None and v.release and protected(f):
+            logger.warning("overreach release blocked for %s: %s", f["id"], f["phrase"][:40])
+            warnings.append("OVERREACH_RELEASE_BLOCKED")
+            kept.append(f)
+        elif v is not None and v.release:
             released.append({"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"), "reason": v.reason,
                              "source": "overreach_review"})
         else:
