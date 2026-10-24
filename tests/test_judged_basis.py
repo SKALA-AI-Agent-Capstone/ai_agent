@@ -215,3 +215,27 @@ async def test_ad_copy_with_a_percentage_is_a_card_even_when_extraction_skips_it
 
     out = await judged_basis([], Judge([]), texts=[texts[0]], section_texts=texts, call=rag)
     assert [f["textId"] for f in out["findings"]] == ["p1"]  # the footnote's percentage is a condition, not a claim
+
+
+async def test_the_overreach_review_releases_cards_before_any_basis_is_fetched():
+    texts = [text("t1", "탄성 복원 63.91% 개선"), text("t2", "촉촉한 제형")]
+    rag = Rag([[SUBSTANTIATION]])
+
+    class Judge(Model):
+        async def parse(self, prompt, schema, **kwargs):
+            self.seen.append((schema.__name__, kwargs["text"]))
+            if schema is ClaimJudgments:
+                return ClaimJudgments(judgments=[
+                    {"id": "f1", "problem": True, "claimType": "clinical", "span": "63.91%", "purpose": "실증", "reason": "수치"},
+                    {"id": "f2", "problem": True, "claimType": "exaggeration", "span": "촉촉한", "purpose": "-", "reason": "-"}])
+            return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
+
+    async def review(cards):
+        return [c for c in cards if c["id"] == "f1"], [{"id": "f2", "phrase": "촉촉한 제형", "source": "overreach_review"}], []
+
+    model = Judge([])
+    out = await judged_basis([finding("f1", "탄성 복원 63.91% 개선", "t1"), finding("f2", "촉촉한 제형", "t2", "exaggeration")],
+                             model, texts=texts, call=rag, review=review)
+    assert [f["id"] for f in out["findings"]] == ["f1"]
+    assert [d["source"] for d in out["dismissed"]] == ["overreach_review"]
+    assert sum(1 for name, _ in model.seen if name == "BasisCheck") == 1  # only the kept card is verified

@@ -370,11 +370,13 @@ async def basis_for(provider, call, finding: dict, line: str, day: str) -> dict:
 
 
 async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | None = None,
-                       section_texts: list[dict] | None = None, review_date: date | None = None, call=None) -> dict:
+                       section_texts: list[dict] | None = None, review_date: date | None = None, call=None,
+                       review=None) -> dict:
     """Same shape as regulations.legal_basis, plus "dismissed": candidates judged not a regulatory concern.
 
     texts are the claim copy the rule sweep reads; section_texts are all copy blocks, footnotes included,
-    used as each claim's context."""
+    used as each claim's context. review, when given, is the last look over the kept cards before any basis is
+    fetched: it returns (kept, released, warnings), and released cards join the dismissed ones."""
     day = (review_date or date.today()).isoformat()
     texts_by_id = {t["id"]: t for t in (section_texts or []) + (texts or [])}
     sections = {}
@@ -426,6 +428,10 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
                     card["readCheck"] = read
                 seen[key] = card
                 kept.append(card)
+        if review is not None and kept:
+            kept, released, notes = await review(kept)
+            dismissed += released
+            warnings += notes
         bundles = {}
         for finding in kept:
             bundles.setdefault(bundle_key(finding, texts_by_id), []).append(finding)

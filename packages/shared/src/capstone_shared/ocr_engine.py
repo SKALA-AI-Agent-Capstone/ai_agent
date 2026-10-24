@@ -1,17 +1,21 @@
 """OCR engines behind one call: PaddleOCR (PP-OCRv5 Korean) first, Tesseract when it is missing or fails.
 
-One PaddleOCR instance and one lock serve the whole process (the ad reader in the Agent and the evidence
-reader share them): the predictor is not thread safe and each instance holds about 1 GB.
+A small pool of PaddleOCR instances serves the whole process (the ad reader in the Agent and the evidence
+reader share it). A predictor is not thread safe, so each instance runs one image at a time. OCR_ENGINES (default 3)
+sets the pool size: on the 17-section Pyunkang ad, 1 instance took 40s, 2 took 25s and 3 took 19s with the same text.
 OCR_ENGINE=tesseract keeps PaddleOCR out, and so does a missing paddleocr package.
 """
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
 import os
+import queue
 import threading
 
 from PIL import Image
 
-LOCK = threading.Lock()
+LOCK = threading.Lock()  # guards pool creation
+_POOL: queue.Queue | None = None
 
 
 @dataclass
@@ -32,18 +36,47 @@ def paddle_enabled() -> bool:
     return True
 
 
-@cache
-def engine():
+def _create():
     from paddleocr import PaddleOCR
     return PaddleOCR(text_detection_model_name="PP-OCRv5_mobile_det", text_recognition_model_name="korean_PP-OCRv5_mobile_rec",
-                     use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False)
+                     use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False,
+                     cpu_threads=max(1, (os.cpu_count() or 4) // pool_size()))
+
+
+def pool_size() -> int:
+    return max(1, int(os.getenv("OCR_ENGINES", "3")))
+
+
+@cache
+def engine():
+    """The first instance, created on its own (warm-up and callers that need just one)."""
+    return _create()
+
+
+@contextmanager
+def slot():
+    """Borrow one instance for one prediction. Instances are created on first need, up to OCR_ENGINES."""
+    global _POOL
+    with LOCK:
+        if _POOL is None:
+            _POOL = queue.Queue()
+            _POOL.put(engine())
+            for _ in range(pool_size() - 1):
+                _POOL.put(None)  # created lazily by the first borrower
+    item = _POOL.get()
+    try:
+        if item is None:
+            item = _create()
+        yield item
+    finally:
+        _POOL.put(item)
 
 
 def paddle_read(image: Image.Image) -> OcrOutput:
     import numpy as np
     array = np.array(image.convert("RGB"))[:, :, ::-1]
-    with LOCK:
-        results = list(engine().predict(array))
+    with slot() as instance:
+        results = list(instance.predict(array))
     rows = []
     for result in results:
         for text, score, box in zip(result["rec_texts"], result["rec_scores"], result["rec_boxes"]):
