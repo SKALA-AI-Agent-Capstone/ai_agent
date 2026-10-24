@@ -56,3 +56,61 @@ async def test_a_figure_claim_is_not_reported_as_missing_evidence_when_the_produ
 
     assert (await checks(evidence_total(request())))["substantiation"] == "evidence_missing"
     assert (await checks(evidence_total(request(stored=1))))["substantiation"] == "evidence_submitted"
+
+
+class Message:
+    def __init__(self, content="", names=()):
+        self.content = content
+        self.tool_calls = [SimpleNamespace(id=f"c{i}", function=SimpleNamespace(name=n),
+                                           model_dump=lambda n=n, i=i: {"id": f"c{i}", "type": "function",
+                                                                        "function": {"name": n, "arguments": "{}"}})
+                           for i, n in enumerate(names)] or None
+
+
+def provider(*turns):
+    replies = iter(turns)
+
+    class Provider:
+        client = True
+
+        async def call_with_tools(self, messages, tools):
+            return next(replies, Message())
+
+    return Provider()
+
+
+STATE = {"tenantId": "t", "reviewId": "r", "product": {"name": "수분크림"}, "texts": [{"text": "촉촉한 사용감"}],
+         "findings": [{"phrase": "촉촉한 사용감", "reason": "감성 표현", "claimType": "exaggeration", "requiredChecks": []}]}
+
+
+async def test_a_skipped_evidence_tool_says_the_model_found_it_unnecessary_and_why(monkeypatch):
+    async def mcp(name, arguments, request=None):
+        return {"status": "found"}
+    monkeypatch.setattr(engine, "mcp_call", mcp)
+    reason = "수치나 시험 결과를 말하는 문구가 없어 증빙 대조가 필요 없습니다."
+    *_, trace = await select_business_tools(provider(Message(names=["verify_functional_approval"]), Message(reason)),
+                                            STATE, request(stored=1))
+    assert {"tool": "structure_evidence", "called": False, "reason": "MODEL_NOT_NEEDED", "note": reason} in trace
+    assert {"tool": "verify_functional_approval", "called": True} in trace
+
+
+async def test_without_registered_evidence_the_tool_is_marked_as_having_nothing_to_read(monkeypatch):
+    async def mcp(name, arguments, request=None):
+        return {"status": "found"}
+    monkeypatch.setattr(engine, "mcp_call", mcp)
+    *_, trace = await select_business_tools(provider(Message("필요한 도구 없음")), STATE, request())
+    assert {"tool": "structure_evidence", "called": False, "reason": "NO_EVIDENCE"} in trace
+    nothing = {**STATE, "product": {}}
+    *_, trace = await select_business_tools(provider(), nothing, request())
+    assert {t["tool"]: t["reason"] for t in trace} == {"structure_evidence": "NO_EVIDENCE",
+                                                         "verify_functional_approval": "NO_PRODUCT_NAME",
+                                                         "verify_patent": "NO_PATENT_CLAIM"}
+
+
+async def test_without_a_model_every_available_tool_runs_and_the_rest_say_why_not(monkeypatch):
+    async def mcp(name, arguments, request=None):
+        return {"status": "found"}
+    monkeypatch.setattr(engine, "mcp_call", mcp)
+    *_, trace = await select_business_tools(SimpleNamespace(client=None), STATE, request(stored=1))
+    assert {"tool": "structure_evidence", "called": True} in trace
+    assert {"tool": "verify_patent", "called": False, "reason": "NO_PATENT_CLAIM"} in trace

@@ -517,8 +517,16 @@ async def select_business_tools(provider, state, request):
         "verify_functional_approval": bool(product.get("name")),
         "verify_patent": bool(candidate_numbers) or any(f.get("claimType") == "patent" for f in state["findings"]),
     }
+    # Why a tool did not run, so the review can say "not needed" apart from "nothing to check with".
+    unavailable_reason = {"structure_evidence": "NO_EVIDENCE", "verify_functional_approval": "NO_PRODUCT_NAME",
+                          "verify_patent": "NO_PATENT_CLAIM"}
+
+    def not_available():
+        return [{"tool": name, "called": False, "reason": unavailable_reason[name]}
+                for name, usable in available.items() if not usable]
+
     if not any(available.values()):
-        return evidence, public, patents, warnings, trace
+        return evidence, public, patents, warnings, not_available()
 
     async def invoke(name):
         await emit(request, "tool_started", tool=name)
@@ -554,8 +562,8 @@ async def select_business_tools(provider, state, request):
         for name, usable in available.items():
             if usable:
                 await invoke(name)
-            trace.append({"tool": name, "called": usable})
-        return evidence, public, patents, warnings, trace
+                trace.append({"tool": name, "called": True})
+        return evidence, public, patents, warnings, trace + not_available()
 
     findings_summary = "\n".join(f"- \"{f['phrase']}\" (claimType={f.get('claimType')}): {f['reason']}"
                                  for f in state["findings"]) or "(없음)"
@@ -568,11 +576,13 @@ async def select_business_tools(provider, state, request):
             f"제출된 증빙서류: {evidence_total(request)}건 (제품에 등록된 증빙 {int(getattr(request, 'productEvidenceCount', 0) or 0)}건 포함)\n"
             f"광고 문구에서 찾은 특허번호 형식 문자열: {len(candidate_numbers)}건"},
     ]
-    called = []
+    called, limited = [], set()
+    ended, model_note = "MODEL_NOT_NEEDED", ""
     started = time.monotonic()
     for _ in range(MAX_TOOL_CALLS_TOTAL + 1):
         if time.monotonic() - started > LOOP_TIMEOUT_SECONDS:
             warnings.append("TOOL_LOOP_TIMEOUT")
+            ended = "LOOP_TIMEOUT"
             break
         try:
             message = await provider.call_with_tools(messages, BUSINESS_TOOL_SPECS)
@@ -588,6 +598,8 @@ async def select_business_tools(provider, state, request):
             break
         tool_calls = message.tool_calls or []
         if not tool_calls:
+            # The selection prompt asks for a short reason when no more tools are needed; keep it for the review.
+            model_note = (message.content or "").strip()[:300]
             break
         messages.append({"role": "assistant", "content": message.content or "",
                          "tool_calls": [tc.model_dump() for tc in tool_calls]})
@@ -596,6 +608,8 @@ async def select_business_tools(provider, state, request):
             same = sum(1 for c in called if c == name)
             if len(called) >= MAX_TOOL_CALLS_TOTAL or same >= MAX_SAME_TOOL_CALLS or not available.get(name):
                 output = {"skipped": "GUARDRAIL_LIMIT_REACHED" if available.get(name) else "TOOL_NOT_APPLICABLE"}
+                if available.get(name):
+                    limited.add(name)
             else:
                 called.append(name)
                 output = await invoke(name)
@@ -610,8 +624,14 @@ async def select_business_tools(provider, state, request):
         trace.append({"tool": "structure_evidence", "called": True, "required": True})
     for name, usable in available.items():
         if usable and name not in called:
-            trace.append({"tool": name, "called": False})
-    return evidence, public, patents, warnings, trace
+            # Available but not run: the model judged it unnecessary for these cards (no card asked for it, or the
+            # evidence rule above would have run it), or a guardrail or the time limit stopped the loop first.
+            reason = "GUARDRAIL_LIMIT" if name in limited else ended
+            entry = {"tool": name, "called": False, "reason": reason}
+            if reason == "MODEL_NOT_NEEDED" and model_note:
+                entry["note"] = model_note
+            trace.append(entry)
+    return evidence, public, patents, warnings, trace + not_available()
 
 
 def merge_nested(findings):
