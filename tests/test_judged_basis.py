@@ -199,10 +199,22 @@ async def test_every_figure_row_is_a_card_even_when_extraction_skips_it_or_the_j
     assert out["dismissed"] == []
 
 
-def test_a_bare_number_in_a_list_row_is_not_forced_as_a_figure_claim():
-    assert jb.is_figure_row({"kind": "table", "text": "보습 12.3% 개선"})
-    assert not jb.is_figure_row({"kind": "table", "text": "7"})  # a scale tick says nothing to substantiate
-    assert not jb.is_figure_row({"kind": "copy", "text": "보습 12.3% 개선"})
+async def test_ad_copy_with_a_percentage_is_a_card_even_when_extraction_skips_it_or_the_judge_waves_it_through():
+    loc = {"kind": "image", "fileId": "a", "page": 1, "bbox": None, "tileId": "a:p1:t1"}
+    texts = [{"id": "p1", "text": "사용자 92% 만족", "role": "claim", "kind": "copy", "location": loc},
+             {"id": "p2", "text": "*20명 대상 설문, 응답률 100%", "role": "condition", "kind": "footnote", "location": loc}]
+    rag = Rag([[SUBSTANTIATION]])
+
+    class Judge(Model):
+        async def parse(self, prompt, schema, **kwargs):
+            self.seen.append((schema.__name__, kwargs["text"]))
+            if schema is ClaimJudgments:
+                return ClaimJudgments(judgments=[{"id": "row-p1", "problem": False,
+                                                  "claimType": "exaggeration", "span": "", "purpose": "", "reason": "-"}])
+            return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
+
+    out = await judged_basis([], Judge([]), texts=[texts[0]], section_texts=texts, call=rag)
+    assert [f["textId"] for f in out["findings"]] == ["p1"]  # the footnote's percentage is a condition, not a claim
 
 
 async def test_the_overreach_review_releases_cards_before_any_basis_is_fetched():

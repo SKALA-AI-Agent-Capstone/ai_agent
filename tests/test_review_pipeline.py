@@ -515,7 +515,8 @@ async def test_business_tool_loop_follows_llm_choice_and_guardrail_caps_repeats(
     assert mcp_calls == ["verify_functional_approval"] * MAX_SAME_TOOL_CALLS  # guardrail stopped the rest
     assert "structure_evidence" not in mcp_calls  # never chosen, so never executed despite being available
     assert public == {"status": "found"}
-    assert {"tool": "structure_evidence", "called": False} in trace
+    assert {"tool": "structure_evidence", "called": False, "reason": "MODEL_NOT_NEEDED"} in trace
+    assert {"tool": "verify_patent", "called": False, "reason": "NO_PATENT_CLAIM"} in trace
     assert trace.count({"tool": "verify_functional_approval", "called": True}) == MAX_SAME_TOOL_CALLS
 
 
