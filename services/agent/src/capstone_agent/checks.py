@@ -20,7 +20,7 @@ from .tools import McpTools
 
 ATTENTION = {"mismatch", "not_found", "ambiguous", "evidence_missing", "prohibited", "restricted",
              "gmp_not_listed", "needs_input", "unavailable", "evidence_mismatch", "evidence_conditions",
-             "evidence_not_covering", "evidence_unread"}
+             "evidence_not_covering", "evidence_unread", "patent_expired"}
 # evidence.match verdict -> check status. supports is the only one the reviewer does not need to chase.
 MATCH_STATUS = {"supports": "evidence_supports", "different_test": "evidence_mismatch",
                 "condition_mismatch": "evidence_conditions", "not_covered": "evidence_not_covering"}
@@ -161,8 +161,76 @@ async def ingredient_check(call, name: str, day: str) -> dict:
                  source="화장품 안전기준 등에 관한 규정", detail=detail)
 
 
+# A submitted document settles only a substantiation question. Claims of medical effect or absolute superiority
+# stay cards even with a matching test, because the expression itself is the problem.
+EVIDENCE_CANNOT_SETTLE = {"drug", "absolute"}
+
+
+def resolved_by_evidence(findings: list[dict]) -> tuple[list[dict], list[dict]]:
+    """-> (kept, resolved). A card leaves when a submitted document supports it and no other check needs attention:
+    the reviewer has nothing left to do for it. It stays listed as resolved, with the document that settled it."""
+    kept, resolved = [], []
+    for f in findings:
+        checks = f.get("checks", [])
+        support = next((c for c in checks if c["type"] == "substantiation" and c["status"] == "evidence_supports"), None)
+        if support and f.get("claimType") not in EVIDENCE_CANNOT_SETTLE and not any(c["attention"] for c in checks):
+            match = support["detail"].get("match") or {}
+            resolved.append({"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"), "source": "evidence_supports",
+                             "reason": support["summary"], "documentId": match.get("documentId"),
+                             "documentName": match.get("documentName")})
+        else:
+            kept.append(f)
+    return kept, resolved
+
+
+def patent_record_cards(findings: list[dict], texts: list[dict], patents: list[dict] | None) -> list[dict]:
+    """A pictured patent certificate whose patent KIPRIS lists as lapsed is a claim in itself: the ad shows a right
+    it no longer has. When no card speaks of the patent yet, the certificate becomes one, so the lapse is shown."""
+    if any(f.get("claimType") == "patent" for f in findings):
+        return []
+    lapsed = [p.get("number") for p in patents or [] if isinstance(p, dict) and p.get("status") == "expired"]
+    cards = []
+    for number in lapsed:
+        digits = number.split("-")[-1] if number else ""
+        block = next((t for t in texts if digits and digits in t.get("text", "").replace(" ", "")), None)
+        if block is None:
+            continue
+        cards.append({"id": f"patent-{number}", "phrase": block["text"][:120], "start": 0, "end": min(len(block["text"]), 120),
+                      "location": block["location"], "textId": block["id"], "tileId": (block.get("location") or {}).get("tileId"),
+                      "severity": "low", "baseSeverity": "low",
+                      "claimType": "patent", "reason": "광고에 실린 특허증의 특허를 KIPRIS에서 조회한 결과입니다.",
+                      "title": "공식 기록과 대조한 특허", "basis": [], "baseBasis": [], "confidence": None, "rewrites": [],
+                      "references": [], "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None,
+                      "requiredChecks": ["patent"], "source": "patent_record"})
+    return cards
+
+
+def patent_check(numbers: list[str], patents: list[dict] | None) -> dict:
+    """Patent claim vs the KIPRIS register status of the numbers printed in the ad."""
+    if not numbers:
+        return check("patent", "needs_input", "특허 표현이 있지만 광고에서 특허번호를 찾지 못했습니다. 번호와 등록 여부를 확인하세요.",
+                     source="KIPRIS Plus")
+    found = {p.get("number") or p.get("id"): p for p in patents or [] if isinstance(p, dict)}
+    expired = [n for n in numbers if (found.get(n) or {}).get("status") == "expired"]
+    registered = [n for n in numbers if (found.get(n) or {}).get("status") == "registered"]
+    detail = {"patents": [found[n] for n in numbers if n in found]}
+    if expired:
+        when = ((found[expired[0]].get("data") or {}).get("registerDate") or "")
+        since = f" ({when[:4]}년 등록)" if len(when) >= 4 else ""
+        return check("patent", "patent_expired",
+                     f"특허 {', '.join(expired)}{since}는 KIPRIS에서 소멸된 권리입니다. 유효한 특허처럼 광고하면 소비자를 오인시킬 수 있습니다.",
+                     source="KIPRIS Plus", detail=detail)
+    if registered:
+        return check("patent", "patent_registered",
+                     f"특허 {', '.join(registered)}는 KIPRIS에서 등록 상태입니다. 광고 효능이 특허 청구 범위에 드는지 확인하세요.",
+                     source="KIPRIS Plus", detail=detail)
+    return check("patent", "evidence_submitted", f"특허번호 {', '.join(numbers[:3])}의 KIPRIS 조회 결과를 확인하세요.",
+                 source="KIPRIS Plus", detail=detail)
+
+
 async def cross_checks(findings: list[dict], *, product: dict, evidence: dict, evidence_count: int,
-                       ad_text: str, provider, review_date: str, call=None, matches: dict | None = None) -> dict:
+                       ad_text: str, provider, review_date: str, call=None, matches: dict | None = None,
+                       patents: list[dict] | None = None) -> dict:
     needed = {c for f in findings for c in f.get("requiredChecks", [])}
     if not needed:
         return {"findings": findings, "summary": {}, "warnings": []}
@@ -211,10 +279,7 @@ async def cross_checks(findings: list[dict], *, product: dict, evidence: dict, e
                 elif kind == "gmp" and gmp_result:
                     results.append(gmp_result)
                 elif kind == "patent":
-                    results.append(check("patent", "needs_input" if not certificate_numbers else "evidence_submitted",
-                                         "특허 표현이 있지만 광고에서 특허번호를 찾지 못했습니다. 번호와 등록 여부를 확인하세요."
-                                         if not certificate_numbers else f"특허번호 {', '.join(certificate_numbers[:3])}의 KIPRIS 조회 결과를 확인하세요.",
-                                         source="KIPRIS Plus"))
+                    results.append(patent_check(certificate_numbers, patents))
             for r in results:
                 summary.setdefault(r["type"], {}).setdefault(r["status"], 0)
                 summary[r["type"]][r["status"]] += 1

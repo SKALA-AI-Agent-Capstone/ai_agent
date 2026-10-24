@@ -197,3 +197,21 @@ async def test_every_figure_row_is_a_card_even_when_extraction_skips_it_or_the_j
     out = await judged_basis([finding("f1", "탄성 4.5% 개선", "r1")], Judge([]), texts=texts, section_texts=texts, call=rag)
     assert sorted(f["textId"] for f in out["findings"]) == ["r1", "r2", "r3"]  # r2 kept despite the judge, r3 added
     assert out["dismissed"] == []
+
+
+async def test_ad_copy_with_a_percentage_is_a_card_even_when_extraction_skips_it_or_the_judge_waves_it_through():
+    loc = {"kind": "image", "fileId": "a", "page": 1, "bbox": None, "tileId": "a:p1:t1"}
+    texts = [{"id": "p1", "text": "사용자 92% 만족", "role": "claim", "kind": "copy", "location": loc},
+             {"id": "p2", "text": "*20명 대상 설문, 응답률 100%", "role": "condition", "kind": "footnote", "location": loc}]
+    rag = Rag([[SUBSTANTIATION]])
+
+    class Judge(Model):
+        async def parse(self, prompt, schema, **kwargs):
+            self.seen.append((schema.__name__, kwargs["text"]))
+            if schema is ClaimJudgments:
+                return ClaimJudgments(judgments=[{"id": "row-p1", "problem": False,
+                                                  "claimType": "exaggeration", "span": "", "purpose": "", "reason": "-"}])
+            return BasisCheck(verdicts=[{"id": "c1", "applies": True, "quote": "실증할 수 있어야 한다", "why": "실증"}])
+
+    out = await judged_basis([], Judge([]), texts=[texts[0]], section_texts=texts, call=rag)
+    assert [f["textId"] for f in out["findings"]] == ["p1"]  # the footnote's percentage is a condition, not a claim
