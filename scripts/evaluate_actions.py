@@ -160,13 +160,20 @@ async def run_once(cases: list[dict], evidence: dict, today: str) -> list[dict]:
     provider = Provider()
     if not provider.client:
         raise SystemExit("OPENAI_API_KEY is not set. The evaluation needs the text model.")
-    async with McpTools(servers=("rag",)) as rag:
-        limit = asyncio.Semaphore(4)
+    results = None
+    try:
+        async with McpTools(servers=("rag",)) as rag:
+            limit = asyncio.Semaphore(4)
 
-        async def one(case):
-            async with limit:
-                return await run_case(provider, rag, case, *evidence[case["id"]], today)
-        return await asyncio.gather(*(one(case) for case in cases))
+            async def one(case):
+                async with limit:
+                    return await run_case(provider, rag, case, *evidence[case["id"]], today)
+            results = await asyncio.gather(*(one(case) for case in cases))
+    except Exception:
+        # A long run can find rag-mcp's idle connection closed when the session ends; the results are already in.
+        if results is None:
+            raise
+    return results
 
 
 def evidence_warnings(evidence: dict) -> dict:
