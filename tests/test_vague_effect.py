@@ -151,3 +151,23 @@ def test_a_long_seller_notice_that_mentions_tests_is_still_not_a_claim():
     c["textId"] = "t2"
     kept, dismissed = dismiss_vague_effects([c], [notice])
     assert kept == [] and dismissed
+
+
+
+def test_a_footnote_naming_a_human_test_is_a_card_when_no_claim_of_its_section_is_checked():
+    from capstone_agent.vague_effect import test_footnote_cards
+    at = lambda f, t: {"fileId": f, "tileId": f"{f}:p1:{t}"}
+    note = "*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 : 2024. 12. 30 ~ 2025. 01. 28 | 30~50대 여성"
+    texts = [{"id": "n", "role": "condition", "text": note, "location": at("b", "t0")},
+             {"id": "s", "role": "condition", "text": "*일시적 모공 개선 평가 기준", "location": at("a", "t0")},
+             {"id": "k", "role": "condition", "text": "*임상시험 결과 20명 대상", "location": at("a", "t2")}]
+    checked = [{"id": "c", "textId": "x", "location": at("a", "t2"), "requiredChecks": ["substantiation"]}]
+    cards = test_footnote_cards(checked, texts)
+    assert [c["phrase"] for c in cards] == [note]            # no test named / its section already checked
+    assert cards[0]["requiredChecks"] == ["substantiation"] and cards[0]["source"] == "test_footnote"
+
+
+def test_a_result_promised_within_a_period_is_protected():
+    assert protected(card("*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어"))
+    assert protected(card("7일 이내 피부결 개선"))
+    assert not vague(card("*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어"))

@@ -119,3 +119,29 @@ def set_aside_low_risk(findings: list[dict], texts: list[dict] | None = None) ->
         else:
             sent.append(f)
     return sent, aside
+
+
+# A footnote naming a human test ("*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 ... | 30~50대 여성")
+# says that test was done on these terms. When no claim of its section goes to the evidence check, the footnote does.
+HUMAN_TEST = re.compile(r"인체\s*적용\s*시험|임상\s*시험")
+
+
+def test_footnote_cards(findings: list[dict], texts: list[dict]) -> list[dict]:
+    from .evidence import where
+    checked = {where(f) for f in findings if "substantiation" in f.get("requiredChecks", [])}
+    taken = {f.get("textId") for f in findings}
+    cards = []
+    for block in texts:
+        line = block.get("text", "").strip()
+        if (block.get("role") != "condition" or block["id"] in taken or where(block) in checked
+                or len(line) > 2 * NOTICE_LENGTH or not HUMAN_TEST.search(line)):
+            continue
+        checked.add(where(block))
+        cards.append({"id": f"note-{block['id']}", "phrase": line, "start": 0, "end": len(line),
+                      "location": block.get("location"), "textId": block["id"], "severity": "low", "baseSeverity": "low",
+                      "claimType": "clinical", "requiredChecks": ["substantiation"],
+                      "reason": "광고 각주가 이 조건의 인체적용시험을 했다고 적고 있어, 제출한 시험 자료와 맞는지 확인해야 합니다.",
+                      "title": "광고에 적힌 시험", "basis": [], "baseBasis": [], "confidence": None, "rewrites": [],
+                      "references": [], "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None,
+                      "source": "test_footnote"})
+    return cards
