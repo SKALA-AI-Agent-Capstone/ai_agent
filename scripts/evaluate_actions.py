@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run the harness evaluation set 2026-10-22 and write its validation report.
+"""Run a harness evaluation set of review results (2026-10-22 by default) and write its validation report.
 
   uv run --all-packages --frozen python scripts/evaluate_actions.py --label baseline --repeat 3
   uv run --all-packages --frozen python scripts/evaluate_actions.py --label after-fix --repeat 3 --before reports/eval/<baseline>.json
   uv run --all-packages --frozen python scripts/evaluate_actions.py --case P01 --case P02
+  uv run --all-packages --frozen python scripts/evaluate_actions.py --cases evals/2026-10-26/harness_cases.json --repeat 3
 
 Needs the running rag-mcp and business-mcp and OPENAI_API_KEY. Evidence PDFs in evals/2026-10-22/fixtures are
 registered on the case's product the way the app does it: the Agent's parse endpoint reads each file once, then
@@ -194,14 +195,17 @@ def prompt_date() -> str | None:
 
 
 def main():
+    global CASES
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", default="run")
     parser.add_argument("--repeat", type=int, default=1, help="Runs to compare; model output varies between runs")
     parser.add_argument("--case", action="append", help="Only this case id (repeatable)")
     parser.add_argument("--before", type=Path, help="Earlier report (.json) to compare against in the result line")
     parser.add_argument("--env-file")
+    parser.add_argument("--cases", type=Path, default=CASES, help="Evaluation set; evidence files are read next to it")
     args = parser.parse_args()
 
+    CASES = args.cases.resolve()
     from action_evaluation import render, summarize, to_csv, validate
     data = json.loads(CASES.read_text(encoding="utf-8"))
     problems = validate(data)
@@ -210,7 +214,7 @@ def main():
     cases = [c for c in data["cases"] if not args.case or c["id"] in args.case]
     missing = [f for c in cases for f in c.get("evidenceFiles") or [] if not (CASES.parent / f).is_file()]
     if missing:
-        raise SystemExit("Evidence files are missing (see evals/2026-10-22/fixtures/README.md): " + ", ".join(sorted(set(missing))))
+        raise SystemExit(f"Evidence files are missing (see {CASES.parent / 'fixtures' / 'README.md'}): " + ", ".join(sorted(set(missing))))
     before = json.loads(args.before.read_text(encoding="utf-8")) if args.before else None
     load_env(args.env_file)
     warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
