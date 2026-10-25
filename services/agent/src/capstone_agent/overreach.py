@@ -13,6 +13,7 @@ import re
 from pydantic import BaseModel
 
 from .instructions import instruction
+from .claim_screening import is_subjective_only
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,8 @@ def group_by_section(findings: list[dict]) -> list[list[dict]]:
 
 def protected(card: dict) -> bool:
     """A card the reviewer must not release: its type or its words say a reviewer has something to check."""
+    if is_subjective_only(card.get("phrase", "")):
+        return False
     from .vague_effect import effect_claim  # an effect on a skin concern ("모공 타이트닝", "노폐물 제거") is protected too
     phrase = card.get("phrase", "")
     return card.get("claimType") in PROTECTED_TYPES or bool(PROTECTED_TEXT.search(phrase)) or effect_claim(phrase)

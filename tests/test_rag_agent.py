@@ -73,6 +73,15 @@ async def test_weak_search_hits_do_not_become_basis():
     assert lookup["findings"][0]["basis"] == [] and lookup["findings"][0]["legalSearch"] == "no_match"
 
 
+async def test_subjective_copy_skips_basis_lookup_without_a_model():
+    async def no_rag(*_args, **_kwargs):
+        raise AssertionError("subjective copy should not trigger basis lookup")
+
+    lookup = await legal_basis([finding("모공이 줄어든 것 같다"), finding("촉촉해지고 싶다")], call=no_rag)
+    assert lookup["status"] == "skipped" and lookup["findings"] == []
+    assert len(lookup["dismissed"]) == 2
+
+
 async def test_every_finding_is_searched_without_a_count_cap():
     findings = [finding(f"문구 {i}", fid=str(i)) for i in range(60)]
     lookup = await legal_basis(findings, call=fake_rag(rules=[DRUG_RULE]))

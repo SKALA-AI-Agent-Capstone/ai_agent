@@ -84,3 +84,10 @@ async def test_protected_and_plain_cards_in_the_same_batch_are_split_by_the_guar
     kept, released, warnings = await review_overreach(ReleaseAll(), cards, TEXTS)
     assert [f["id"] for f in kept] == ["a", "c"] and [r["id"] for r in released] == ["p"]
     assert warnings == ["OVERREACH_RELEASE_BLOCKED"]
+
+
+async def test_subjective_copy_can_be_released_even_with_a_functional_claim_type():
+    cards = [card("a", "주름이 좋아진 것 같다", "wrinkle"), card("b", "미백된 느낌이다", "whitening")]
+    kept, released, warnings = await review_overreach(ReleaseAll(), cards, TEXTS)
+    assert kept == [] and [item["id"] for item in released] == ["a", "b"]
+    assert warnings == []
