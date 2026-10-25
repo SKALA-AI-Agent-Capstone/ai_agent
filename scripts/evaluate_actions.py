@@ -5,9 +5,11 @@
   uv run --all-packages --frozen python scripts/evaluate_actions.py --label after-fix --repeat 3 --before reports/eval/<baseline>.json
   uv run --all-packages --frozen python scripts/evaluate_actions.py --case P01 --case P02
 
-Needs the running rag-mcp and business-mcp and OPENAI_API_KEY. Evidence PDFs are read from evals/2026-10-22/fixtures
-through the real extraction function; only the file transfer from the Backend is replaced. A case with
-fault evidence_parse_error gets an injected parser failure. Everything goes to reports/eval (Git ignores it):
+Needs the running rag-mcp and business-mcp and OPENAI_API_KEY. Evidence PDFs in evals/2026-10-22/fixtures are
+registered on the case's product the way the app does it: the Agent's parse endpoint reads each file once, then
+structure_evidence gets the stored result in the shape Spring serves it. Only the two Backend transfers are replaced.
+A case with fault evidence_parse_error fails that read, so Spring leaves the file out of the review as it does in
+the app. Everything goes to reports/eval (Git ignores it):
 the raw report (.json), the validation report section (.md) and its rows as a CSV. Paste the .md into the
 검증 결과 section of backend/docs/13-harness-evaluation/2026-10-22.md; --before fills 개선 전 and 개선 후.
 """
@@ -49,36 +51,65 @@ def action_for(findings: list[dict]) -> list[str]:
     return json.loads(done.stdout)
 
 
+REGISTRATION_FAILURES: dict[str, list[str]] = {}
+
+
+def stored_document(doc_id: str, name: str, parsed: dict) -> dict:
+    """One row of Spring's /internal/reviews/{id}/product-evidence, built as EvidenceService.forRun builds it."""
+    match = parsed.get("productMatch") or {}
+    narrowed = bool(parsed.get("products"))
+    wanted = set(match.get("pages", []))
+    text = "".join(page["text"] + "\n" for page in parsed.get("pages", [])
+                   if (not narrowed or page["n"] in wanted) and page.get("text", "").strip())
+    return {"id": doc_id, "docType": "test_report", "name": name, "pages": parsed.get("pageCount"),
+            "readerVersion": parsed.get("readerVersion"), "productNotInReport": narrowed and not match,
+            "text": text, "version": parsed.get("version"), "issuer": parsed.get("issuer"),
+            "codes": parsed.get("codes", []), "unreadPages": parsed.get("unreadPages", []),
+            "productPages": match.get("pages", []), "checkPages": match.get("checkPages", []),
+            "results": match.get("results", [])}
+
+
 async def extract_evidence(case: dict) -> tuple[dict, int]:
-    """Run the business-mcp extraction on the case's PDFs. Called one case at a time, before the model runs,
-    because it swaps the HTTP fetch for a local file read."""
+    """Register the case's PDFs on its product, then run structure_evidence on the stored result. Called one case at
+    a time, before the model runs, because it swaps the two Backend transfers for local data."""
+    from action_evaluation import parse_condition
+    from capstone_agent import evidence_reading
     from capstone_agent.guardrails import mask_tool_result
+    from capstone_agent.review_engine import Provider
     from capstone_business_mcp import review_tools
 
     files = case.get("evidenceFiles") or []
     if not files:
         return dict(NO_EVIDENCE), 0
-    paths = [CASES.parent / f for f in files]
-    documents = [{"id": f"{case['id']}-{n}", "name": p.name, "docType": "test_report", "mimeType": "application/pdf"}
-                 for n, p in enumerate(paths)]
-    by_id = {d["id"]: p.read_bytes() for d, p in zip(documents, paths)}
+    product_name = parse_condition(case.get("condition", "")).get("name")
+    paths = {f"{case['id']}-{n}": CASES.parent / f for n, f in enumerate(files)}
 
-    async def fetch(self, url, *args, **kwargs):
-        content = by_id[url.rsplit("/", 1)[-1]]
-        return httpx.Response(200, content=content, request=httpx.Request("GET", url))
+    async def read_file(evidence_id):
+        if case.get("fault") == "evidence_parse_error":
+            raise RuntimeError("injected parser failure")
+        return paths[evidence_id].read_bytes()
 
-    faults = [patch.object(review_tools, "prepare_evidence", side_effect=RuntimeError("injected parser failure"))] \
-        if case.get("fault") == "evidence_parse_error" else []
-    with patch.object(httpx.AsyncClient, "get", fetch):
-        for fault in faults:
-            fault.start()
-        try:
-            evidence = await review_tools.structure("evaluation", case["id"], documents, 1, "evaluation-only")
-        finally:
-            for fault in faults:
-                fault.stop()
+    # 1) Registration: the Agent's /internal/evidence/parse. Spring stores a failed read as failed and never serves it.
+    stored = []
+    with patch.object(evidence_reading, "fetch_evidence", read_file):
+        for doc_id, path in paths.items():
+            request = evidence_reading.EvidenceParseRequest(evidenceId=doc_id, productName=product_name)
+            try:
+                parsed = await evidence_reading.parse_stored_evidence(request, Provider())
+            except Exception as error:
+                REGISTRATION_FAILURES.setdefault(case["id"], []).append(f"READ_FAILED {path.name}: {type(error).__name__}")
+                continue
+            stored.append(stored_document(doc_id, path.name, parsed))
+
+    # 2) Review: structure_evidence asks Spring for the stored results of the review's product.
+    async def serve(self, url, *args, **kwargs):
+        return httpx.Response(200, json={"documents": stored}, request=httpx.Request("GET", url))
+
+    with patch.object(httpx.AsyncClient, "get", serve):
+        evidence = await review_tools.structure("evaluation", case["id"], [], 1, "evaluation-only")
     # The review passes tool results through the same masking before a model sees them.
-    return mask_tool_result("structure_evidence", evidence), len(files)
+    # The run request counts only the stored results, so a failed read means the review sees no evidence.
+    return mask_tool_result("structure_evidence", evidence), len(stored)
 
 
 async def run_case(provider, rag, case: dict, evidence: dict, evidence_count: int, today: str) -> dict:
@@ -129,13 +160,20 @@ async def run_once(cases: list[dict], evidence: dict, today: str) -> list[dict]:
     provider = Provider()
     if not provider.client:
         raise SystemExit("OPENAI_API_KEY is not set. The evaluation needs the text model.")
-    async with McpTools(servers=("rag",)) as rag:
-        limit = asyncio.Semaphore(4)
+    results = None
+    try:
+        async with McpTools(servers=("rag",)) as rag:
+            limit = asyncio.Semaphore(4)
 
-        async def one(case):
-            async with limit:
-                return await run_case(provider, rag, case, *evidence[case["id"]], today)
-        return await asyncio.gather(*(one(case) for case in cases))
+            async def one(case):
+                async with limit:
+                    return await run_case(provider, rag, case, *evidence[case["id"]], today)
+            results = await asyncio.gather(*(one(case) for case in cases))
+    except Exception:
+        # A long run can find rag-mcp's idle connection closed when the session ends; the results are already in.
+        if results is None:
+            raise
+    return results
 
 
 def evidence_warnings(evidence: dict) -> dict:
@@ -143,6 +181,7 @@ def evidence_warnings(evidence: dict) -> dict:
     out = {}
     for case_id, (extracted, _) in evidence.items():
         codes = [f"{f['code']}" + (f" p.{f['page']}" if f.get("page") else "") for f in extracted.get("failures", [])]
+        codes = REGISTRATION_FAILURES.get(case_id, []) + codes
         if codes:
             out[case_id] = codes
     return out
