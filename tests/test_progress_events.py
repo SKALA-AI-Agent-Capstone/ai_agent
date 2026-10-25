@@ -44,6 +44,19 @@ def test_tool_success_ignores_an_empty_error_field():
     assert not engine.tool_succeeded([{"status": "registered", "error": None}, {"status": "api_error"}])
 
 
+def test_a_lookup_that_came_back_without_an_answer_is_not_a_failed_call():
+    # What the adapters really return: an informational code on a call that worked.
+    assert engine.tool_succeeded({"status": "ambiguous", "error": "IDENTIFIER_MAPPING_OR_PAGINATION_REQUIRES_CONFIRMATION"})
+    assert engine.tool_succeeded({"status": "cancelled", "error": "REPORTED_ITEM_CANCELLED"})
+    assert engine.tool_succeeded([{"status": "needs_confirm", "error": "NUMBER_REQUIRES_CONFIRMATION"}])
+    assert engine.tool_succeeded([{"status": "unavailable", "error": "NO_EXACT_MATCH_OR_INCOMPLETE_SEARCH"}])
+    assert engine.tool_succeeded({"status": "incomplete", "error": "SCAN_LIMIT_REACHED"})
+    # The call itself failing is still a failure.
+    assert not engine.tool_succeeded({"status": "error", "error": "API_NOT_CONFIGURED"})
+    assert not engine.tool_succeeded([{"status": "unavailable", "error": "PROVIDER_REQUEST_FAILED"}])
+    assert not engine.tool_succeeded({"error": "VERIFY_PATENT_TOOL_UNAVAILABLE"})
+
+
 @pytest.mark.asyncio
 async def test_progress_is_a_step_done_event_and_never_raises(monkeypatch):
     sent = []

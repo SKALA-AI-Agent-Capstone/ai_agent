@@ -91,7 +91,7 @@ def test_a_long_explanation_or_seller_notice_is_not_a_claim_unless_it_states_an_
     kept, dismissed = dismiss_vague_effects([card(kurly, "ingredient", i="k")])
     assert kept == [] and dismissed[0]["source"] == "notice_text"
     long_claim = card("임상 시험 결과 " + "피부 탄력이 좋아지고 " * 12 + "주름이 30% 개선되었습니다", "clinical", i="l")
-    assert dismiss_vague_effects([long_claim])[0] == [long_claim]
+    assert [f["id"] for f in dismiss_vague_effects([long_claim])[0]] == ["l"]          # a claim that cites a test stays
 
 
 def test_an_effect_claim_the_judge_dropped_comes_back_as_a_card():
@@ -124,3 +124,50 @@ def test_immediacy_alone_is_pace_but_an_immediate_change_is_specific():
 def test_lifting_as_mood_is_vague_but_a_lifting_effect_is_not():
     assert vague({"phrase": "탄력 넘치는 리프팅 시너지 조합!", "claimType": "exaggeration"})
     assert not vague({"phrase": "사용 후 즉각적인 리프팅 효과", "claimType": "exaggeration"})
+
+
+LINE = {"id": "t1", "text": "시험 결과 : 피부 일차 자극 평가에 대한 인체적용시험 결과, 저자극 제품군에 속하는 것으로 판단"}
+
+
+def test_a_tail_clause_of_a_line_that_cites_a_test_goes_to_the_evidence_check():
+    tail = card("저자극 제품군에 속하는 것으로 판단", i="a")
+    tail["textId"] = "t1"
+    assert vague(tail)                                                   # alone it names nothing checkable
+    kept, dismissed = dismiss_vague_effects([tail], [LINE])
+    assert dismissed == [] and "substantiation" in kept[0]["requiredChecks"]
+    assert dismiss_vague_effects([tail], [])[1][0]["source"] == "vague_effect"     # without the line it still leaves
+
+
+def test_a_low_rated_card_from_a_line_citing_a_test_is_sent_on():
+    from capstone_agent.vague_effect import set_aside_low_risk
+    tail = {**card("저자극 제품군에 속하는 것으로 판단", i="a"), "parseRisk": "low", "textId": "t1"}
+    assert set_aside_low_risk([tail], [LINE])[0] == [tail]
+    assert set_aside_low_risk([tail], [])[1][0]["source"] == "low_at_parse"
+
+
+def test_a_long_seller_notice_that_mentions_tests_is_still_not_a_claim():
+    notice = {"id": "t2", "text": "임상 시험 결과 " + "안전성을 확인하기 위해 여러 기관의 의견을 참고하고 있습니다. " * 8}
+    c = card("안전성을 확인하기 위해 여러 기관의 의견을 참고", i="n")
+    c["textId"] = "t2"
+    kept, dismissed = dismiss_vague_effects([c], [notice])
+    assert kept == [] and dismissed
+
+
+
+def test_a_footnote_naming_a_human_test_is_a_card_when_no_claim_of_its_section_is_checked():
+    from capstone_agent.vague_effect import test_footnote_cards
+    at = lambda f, t: {"fileId": f, "tileId": f"{f}:p1:{t}"}
+    note = "*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 : 2024. 12. 30 ~ 2025. 01. 28 | 30~50대 여성"
+    texts = [{"id": "n", "role": "condition", "text": note, "location": at("b", "t0")},
+             {"id": "s", "role": "condition", "text": "*일시적 모공 개선 평가 기준", "location": at("a", "t0")},
+             {"id": "k", "role": "condition", "text": "*임상시험 결과 20명 대상", "location": at("a", "t2")}]
+    checked = [{"id": "c", "textId": "x", "location": at("a", "t2"), "requiredChecks": ["substantiation"]}]
+    cards = test_footnote_cards(checked, texts)
+    assert [c["phrase"] for c in cards] == [note]            # no test named / its section already checked
+    assert cards[0]["requiredChecks"] == ["substantiation"] and cards[0]["source"] == "test_footnote"
+
+
+def test_a_result_promised_within_a_period_is_protected():
+    assert protected(card("*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어"))
+    assert protected(card("7일 이내 피부결 개선"))
+    assert not vague(card("*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어"))

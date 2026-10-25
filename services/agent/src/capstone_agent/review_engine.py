@@ -28,7 +28,7 @@ from .regulations import legal_basis, search_basis
 from .judged_basis import judged_basis
 from .overreach import review_overreach
 from .ingredient_presence import rescue_ingredient_claims, settle_ingredient_claims
-from .vague_effect import dismiss_vague_effects, set_aside_low_risk
+from .vague_effect import dismiss_vague_effects, set_aside_low_risk, test_footnote_cards
 from .severity_rules import raise_for_lapsed_patents
 from .tools import McpTools
 from .guardrails import mask_tool_result
@@ -474,16 +474,24 @@ BUSINESS_TOOL_SPECS = [
 ]
 
 
+# Codes that say the call itself did not work (no key, the provider did not answer or refused the request, the tool
+# could not be reached). Every other "error" an adapter fills in is information about a call that worked: nothing was
+# found, the result needs a person's confirmation, the reported item was cancelled, the search was cut short.
+CALL_FAILED = {"API_NOT_CONFIGURED", "PROVIDER_REQUEST_FAILED", "PROVIDER_REJECTED_REQUEST", "KNOWLEDGE_DB_UNAVAILABLE",
+               "UNKNOWN_TOOL"}
+
+
 def tool_succeeded(output):
-    """For the progress event only: an adapter error inside a result (api_error, not configured) is a failure.
-    Adapter results always carry an "error" key, so only a non-empty value counts. A lookup that found
-    nothing (not_found) or needs confirmation is a successful call, not a failure."""
+    """For the progress event only: the call must have failed, not the lookup come back empty. A lookup that found
+    nothing (not_found), found several candidates (ambiguous) or needs confirmation (needs_confirm, no exact patent match)
+    is a successful call, not a failure."""
     items = output if isinstance(output, list) else [output]
     for item in items:
         if not isinstance(item, dict):
             continue
         status = str(item.get("status", "")).lower()
-        if item.get("error") or status in ("api_error", "api_not_configured", "error"):
+        code = str(item.get("error") or "")
+        if status in ("api_error", "api_not_configured") or code in CALL_FAILED or code.endswith("_TOOL_UNAVAILABLE"):
             return False
     return True
 
@@ -734,7 +742,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         claim_texts = [t for t in state["texts"] if t.get("role") != "condition"]
         # With a model: judge, pick basis tools per claim, verify apart (judged_basis.py). Without one: rules and search.
         # Cards the first pass rated low go no further unless they name something checkable (vague_effect.py).
-        candidates, low_at_parse = set_aside_low_risk(state["findings"])
+        candidates, low_at_parse = set_aside_low_risk(state["findings"], state["texts"])
         if provider.client:
             # The overreach review releases cards nothing in the ad supports before any basis is fetched for them.
             lookup = await judged_basis(candidates, provider, texts=claim_texts, section_texts=state["texts"],
@@ -746,8 +754,10 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         lookup["findings"], lookup["dismissed"] = rescue_ingredient_claims(lookup["findings"], lookup.get("dismissed", []),
                                                                            state["texts"])
         # Generic care copy that names no specific effect has nothing for a reviewer to check (vague_effect.py).
-        kept, vague = dismiss_vague_effects(lookup["findings"])
+        kept, vague = dismiss_vague_effects(lookup["findings"], state["texts"])
         lookup["findings"], lookup["dismissed"] = kept, lookup["dismissed"] + vague + low_at_parse
+        # A footnote that names a human test is checked against the evidence when no claim of its section is.
+        lookup["findings"] += test_footnote_cards(lookup["findings"], state["texts"])
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
             if not finding.get("tileId"):
@@ -781,8 +791,8 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
             # 증빙마다 시험 요약을 만들고, 실증이 필요한 주장과 한 번에 대조한다(evidence.py).
             try:
                 evidence["summaries"] = await summarize(provider, evidence["documents"])
-                matches = await match_evidence(provider, result["findings"], evidence["summaries"],
-                                               [t["text"] for t in state["texts"]])
+                matches = await match_evidence(provider, result["findings"], evidence["summaries"], state["texts"],
+                                               evidence["documents"])
                 evidence["claimMatches"] = [{"findingId": k, **v} for k, v in matches.items()]
             except Exception:
                 warnings.append("EVIDENCE_MATCH_FAILED")

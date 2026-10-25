@@ -31,7 +31,8 @@ ISSUERS = (
     Issuer("ksrc", "KSRC 한국피부임상연구센터", re.compile(r"한국피부임상연구센터|KSRC"),
            (("연구 코드", re.compile(r"HBSE-[A-Z]+-\d{5}")),)),
     Issuer("probem", "프로브엠 피부임상연구센터", re.compile(r"프로브엠"),
-           (("연구번호", re.compile(r"PM-\d{2}J\d{2}-SA\d{3}")),
+           # The two letters name the test (SA 자극, LI 리프팅 ...); a study of any test keeps its number.
+           (("연구번호", re.compile(r"PM-\d{2}J\d{2}-[A-Z]{2}\d{3}")),
             ("시료번호", re.compile(r"PM-\d{2}SA-\d{3}")))),
 )
 

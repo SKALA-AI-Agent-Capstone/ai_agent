@@ -61,11 +61,35 @@ def effect_claim(phrase: str) -> bool:
     return bool(phrase) and len(phrase) <= NOTICE_LENGTH and bool(EFFECT_ITSELF.search(phrase))
 
 
-def dismiss_vague_effects(findings: list[dict]) -> tuple[list[dict], list[dict]]:
-    """-> (kept, dismissed). The dismissed entries say why, like every other dismissal."""
+# The line the card was taken from cites a test ("시험 결과 : 피부 일차 자극 평가에 대한 인체적용시험 결과, 저자극 제품군에
+# 속하는 것으로 판단"). The extraction may hand over only the tail clause ("저자극 제품군에 속하는 것으로 판단"), which says
+# nothing specific alone; the line as a whole is a test result a submitted document can confirm or not.
+TEST_CITED = re.compile(r"시험\s*(?:결과|성적)|인체\s*적용\s*시험|임상|연구\s*결과|시험\s*기관")
+
+
+def source_line(card: dict, texts: list[dict] | None) -> str:
+    block = next((t for t in texts or [] if t.get("id") == card.get("textId")), None)
+    return (block or {}).get("text", "") or card.get("phrase", "")
+
+
+def cites_test(card: dict, texts: list[dict] | None) -> bool:
+    line = source_line(card, texts)
+    return len(line) <= NOTICE_LENGTH and bool(TEST_CITED.search(line))
+
+
+def needs_evidence(card: dict) -> dict:
+    checks = card.get("requiredChecks", [])
+    return card if "substantiation" in checks else {**card, "requiredChecks": [*checks, "substantiation"]}
+
+
+def dismiss_vague_effects(findings: list[dict], texts: list[dict] | None = None) -> tuple[list[dict], list[dict]]:
+    """-> (kept, dismissed). The dismissed entries say why, like every other dismissal. A card whose line cites a test
+    result is kept and goes to the evidence check, whatever its own words say."""
     kept, dismissed = [], []
     for f in findings:
-        if notice(f):
+        if cites_test(f, texts):
+            kept.append(needs_evidence(f))
+        elif notice(f):
             dismissed.append({"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"), "source": "notice_text",
                               "reason": "판매처 안내나 설명문처럼 긴 글이라 광고 주장으로 보지 않았습니다."})
         elif vague(f):
@@ -84,14 +108,40 @@ def specific(card: dict) -> bool:
                 or (card.get("claimType") == "ingredient" and names_ingredient(phrase)) or ingredient_claim(phrase))
 
 
-def set_aside_low_risk(findings: list[dict]) -> tuple[list[dict], list[dict]]:
+def set_aside_low_risk(findings: list[dict], texts: list[dict] | None = None) -> tuple[list[dict], list[dict]]:
     """-> (sent on, set aside). A card the first pass rated low risk is not judged further, unless it names something
     checkable: a first-pass "low" on "볼륨 개선도 92.7%" or "미백" would otherwise drop a real claim."""
     sent, aside = [], []
     for f in findings:
-        if f.get("parseRisk") == "low" and not specific(f):
+        if f.get("parseRisk") == "low" and not specific(f) and not cites_test(f, texts):
             aside.append({"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"), "source": "low_at_parse",
                           "reason": "1차 판단에서 위험이 낮다고 본 일반 표현이라 다음 단계로 보내지 않았습니다."})
         else:
             sent.append(f)
     return sent, aside
+
+
+# A footnote naming a human test ("*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 ... | 30~50대 여성")
+# says that test was done on these terms. When no claim of its section goes to the evidence check, the footnote does.
+HUMAN_TEST = re.compile(r"인체\s*적용\s*시험|임상\s*시험")
+
+
+def test_footnote_cards(findings: list[dict], texts: list[dict]) -> list[dict]:
+    from .evidence import where
+    checked = {where(f) for f in findings if "substantiation" in f.get("requiredChecks", [])}
+    taken = {f.get("textId") for f in findings}
+    cards = []
+    for block in texts:
+        line = block.get("text", "").strip()
+        if (block.get("role") != "condition" or block["id"] in taken or where(block) in checked
+                or len(line) > 2 * NOTICE_LENGTH or not HUMAN_TEST.search(line)):
+            continue
+        checked.add(where(block))
+        cards.append({"id": f"note-{block['id']}", "phrase": line, "start": 0, "end": len(line),
+                      "location": block.get("location"), "textId": block["id"], "severity": "low", "baseSeverity": "low",
+                      "claimType": "clinical", "requiredChecks": ["substantiation"],
+                      "reason": "광고 각주가 이 조건의 인체적용시험을 했다고 적고 있어, 제출한 시험 자료와 맞는지 확인해야 합니다.",
+                      "title": "광고에 적힌 시험", "basis": [], "baseBasis": [], "confidence": None, "rewrites": [],
+                      "references": [], "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None,
+                      "source": "test_footnote"})
+    return cards
