@@ -27,6 +27,9 @@ from .instructions import instruction
 from .regulations import legal_basis, search_basis
 from .judged_basis import judged_basis
 from .overreach import review_overreach
+from .ingredient_presence import rescue_ingredient_claims, settle_ingredient_claims
+from .vague_effect import dismiss_vague_effects, set_aside_low_risk
+from .severity_rules import raise_for_lapsed_patents
 from .tools import McpTools
 from .guardrails import mask_tool_result
 from .patent_certificate import group_patent_certificate, patent_numbers
@@ -616,10 +619,11 @@ async def select_business_tools(provider, state, request):
                 output = await invoke(name)
                 trace.append({"tool": name, "called": True})
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(output, default=str)[:4000]})
-    # Registered evidence is what the reviewer submitted to answer substantiation claims: when a card needs it,
+    # Registered evidence is what the reviewer submitted to answer substantiation claims, and it is also where an
+    # ingredient claim is confirmed (ingredient_presence): when a card needs it,
     # the comparison is not left to the model's choice (it skipped the tool in 2 of 4 runs with evidence present).
     if available["structure_evidence"] and "structure_evidence" not in called and \
-            any("substantiation" in f.get("requiredChecks", []) for f in state["findings"]):
+            any("substantiation" in f.get("requiredChecks", []) or f.get("claimType") == "ingredient" for f in state["findings"]):
         called.append("structure_evidence")
         await invoke("structure_evidence")
         trace.append({"tool": "structure_evidence", "called": True, "required": True})
@@ -692,7 +696,7 @@ async def review_text(provider, texts, manifest=()):
             findings.append({"id":f"text-{len(findings)}","phrase":issue.phrase,"start":start,"end":start+len(issue.phrase),
                 "location":source["location"],"textId":source["id"],"tileId":assign_tile(source["location"],manifest),
                 "severity":"low","baseSeverity":"low",
-                "claimType":issue.claimType,"reason":issue.reason,"title":"근거 대조 전 확인할 문구",
+                "claimType":issue.claimType,"reason":issue.reason,"title":"근거 대조 전 확인할 문구","parseRisk":issue.risk,
                 "basis":[],"baseBasis":[],"confidence":None,"rewrites":issue.rewrites,"references":[],"category":"확인할 광고 주장",
                 "legalStatus":"not_evaluated","escalation":None})
     return merge_nested(findings), failures
@@ -729,13 +733,21 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         await emit(request, "tool_started", tool="legal_basis")
         claim_texts = [t for t in state["texts"] if t.get("role") != "condition"]
         # With a model: judge, pick basis tools per claim, verify apart (judged_basis.py). Without one: rules and search.
+        # Cards the first pass rated low go no further unless they name something checkable (vague_effect.py).
+        candidates, low_at_parse = set_aside_low_risk(state["findings"])
         if provider.client:
             # The overreach review releases cards nothing in the ad supports before any basis is fetched for them.
-            lookup = await judged_basis(state["findings"], provider, texts=claim_texts, section_texts=state["texts"],
+            lookup = await judged_basis(candidates, provider, texts=claim_texts, section_texts=state["texts"],
                                         review=lambda cards: review_overreach(provider, cards, state["texts"]))
         else:
-            lookup = await legal_basis(state["findings"], texts=claim_texts)
+            lookup = await legal_basis(candidates, texts=claim_texts)
         await emit(request, "tool_finished", tool="legal_basis", ok=lookup["status"] in ("connected", "skipped"))
+        # A plain ingredient claim is not settled by judgment but by the attached material (checks node).
+        lookup["findings"], lookup["dismissed"] = rescue_ingredient_claims(lookup["findings"], lookup.get("dismissed", []),
+                                                                           state["texts"])
+        # Generic care copy that names no specific effect has nothing for a reviewer to check (vague_effect.py).
+        kept, vague = dismiss_vague_effects(lookup["findings"])
+        lookup["findings"], lookup["dismissed"] = kept, lookup["dismissed"] + vague + low_at_parse
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
             if not finding.get("tileId"):
@@ -782,6 +794,9 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         out["warnings"] = out["warnings"] + warnings
         result = {**result, "evidence": evidence}
         kept, resolved = resolved_by_evidence(out["findings"])
+        # A card that only says what the product contains is settled when the attached material says it too.
+        kept, settled = settle_ingredient_claims(kept, state["texts"], evidence.get("documents", []))
+        resolved = resolved + settled
         return {"result": {**result, "findings": kept, "checksSummary": out["summary"],
                            "dismissedFindings": result.get("dismissedFindings", []) + resolved,
                            "functionalReports": out.get("functionalReports"),
@@ -796,6 +811,9 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
             if severity != finding["severity"]:
                 finding["escalation"] = {"from": finding["severity"], "reason": reason or "조문 근거 및 증빙 대조 결과"}
             finding["severity"] = severity
+        # A floor from public records (severity_rules.py): claims in an ad that pictures a lapsed patent are high.
+        current_findings = raise_for_lapsed_patents(current_findings, state["result"].get("texts", []),
+                                                    state["result"].get("patents"))
         try:
             async with McpTools(servers=("rag",)) as call:
                 detected = await build_violations(current_findings, provider, call)

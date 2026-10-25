@@ -10,6 +10,7 @@ Hits are citation candidates for the reviewer. The agent does not decide legalit
 """
 import asyncio
 from datetime import date
+from difflib import SequenceMatcher
 import re
 
 from .tools import McpTools
@@ -181,11 +182,13 @@ async def sweep_findings(call, texts: list[dict], findings: list[dict]) -> list[
         compact = squeeze(line)
         if not compact or any(k and (k in compact or compact in k) for k in known):
             continue
-        # The same figure or expression already sits in another claim (often an OCR-noisy duplicate line).
-        if all(any(squeeze(token) in k for k in known) for token in match["matched"]):
+        # The same figure or expression already sits in a claim that reads like this line (often an OCR-noisy duplicate).
+        # Another sentence using the same word ("브라이트닝 듀얼 세럼" beside "…브라이트닝 세럼") is a claim of its own.
+        if all(any(squeeze(token) in k and SequenceMatcher(None, compact, k).ratio() >= 0.6 for k in known)
+               for token in match["matched"]):
             continue
         claim_type = next((SWEEP_CLAIM_TYPES[r] for r in match["rules"] if r in SWEEP_CLAIM_TYPES), None) or \
-            ("wrinkle" if "주름" in line else "whitening" if re.search("미백|기미", line) else "exaggeration")
+            ("wrinkle" if "주름" in line else "whitening" if re.search("미백|기미|브라이트닝|화이트닝|잡티", line) else "exaggeration")
         known.append(compact)
         added.append({"id": f"rule-{match['index']}", "phrase": line, "start": source["text"].find(line),
                       "end": source["text"].find(line) + len(line), "location": source["location"], "textId": source["id"],

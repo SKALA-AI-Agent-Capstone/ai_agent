@@ -24,7 +24,8 @@ PROTECTED_TYPES = {"wrinkle", "whitening", "absolute", "patent", "drug"}
 PROTECTED_TEXT = re.compile(
     r"미백|주름|자외선|탈모|여드름|튼살|염모|체모|아토피"                       # functional effects (심사·보고 대상)
     r"|\d+(?:[.,]\d+)?\s*(?:%|％|퍼센트|배)"                                  # figures stated as results or comparisons
-    r"|\d+\s*(?:초|분|시간|일|주|개월|회)\s*(?:만에|만으로|후|간|동안)"                # a period or count of use for a result
+    r"|\d+\s*(?:초|분|시간|일|주|개월|회)\s*(?:만에|만으로)"                         # how fast a result comes
+    r"|\d+\s*(?:일|주|개월|회)\s*(?:후|간|동안).{0,12}(?:개선|효과|변화|감소|증가|완화)"  # a result after a period of use
     r"|최초|최고|유일|1위|No\.?\s*1|세계|업계|독보|완벽|영구|가장"               # absolute claims and comparisons
     r"|특허|인증|수상|심사|임상|시험|설문|검증|인체적용|피부과|의사|병원|약국",    # public basis and tests
     re.IGNORECASE)
@@ -59,7 +60,9 @@ def group_by_section(findings: list[dict]) -> list[list[dict]]:
 
 def protected(card: dict) -> bool:
     """A card the reviewer must not release: its type or its words say a reviewer has something to check."""
-    return card.get("claimType") in PROTECTED_TYPES or bool(PROTECTED_TEXT.search(card.get("phrase", "")))
+    from .vague_effect import effect_claim  # an effect on a skin concern ("모공 타이트닝", "노폐물 제거") is protected too
+    phrase = card.get("phrase", "")
+    return card.get("claimType") in PROTECTED_TYPES or bool(PROTECTED_TEXT.search(phrase)) or effect_claim(phrase)
 
 
 async def review_overreach(provider, findings: list[dict], texts: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
