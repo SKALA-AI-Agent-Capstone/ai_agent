@@ -154,17 +154,17 @@ def test_a_long_seller_notice_that_mentions_tests_is_still_not_a_claim():
 
 
 
-def test_an_effect_under_a_footnote_citing_a_test_goes_to_the_evidence_check():
-    at = {"fileId": "b", "tileId": "b:p1:t0"}
-    texts = [{"id": "c", "text": "높은 만족도의 모공개선 효과", "location": at},
-             {"id": "f", "text": "*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 : 2024. 12. 30 ~ 2025. 01. 28",
-              "location": at}]
-    effect = {**card("모공개선 효과", i="e"), "textId": "c", "location": at}
-    mood = {**card("높은 만족도의", i="m"), "textId": "c", "location": at}
-    elsewhere = {**card("모공개선 효과", i="o"), "textId": "x", "location": {"fileId": "a", "tileId": "a:p1:t2"}}
-    kept, dismissed = dismiss_vague_effects([effect, mood, elsewhere], texts)
-    assert [f["id"] for f in kept] == ["e"] and "substantiation" in kept[0]["requiredChecks"]
-    assert {d["id"] for d in dismissed} == {"m", "o"}      # no effect word, or no test footnote in its section
+def test_a_footnote_naming_a_human_test_is_a_card_when_no_claim_of_its_section_is_checked():
+    from capstone_agent.vague_effect import test_footnote_cards
+    at = lambda f, t: {"fileId": f, "tileId": f"{f}:p1:{t}"}
+    note = "*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 : 2024. 12. 30 ~ 2025. 01. 28 | 30~50대 여성"
+    texts = [{"id": "n", "role": "condition", "text": note, "location": at("b", "t0")},
+             {"id": "s", "role": "condition", "text": "*일시적 모공 개선 평가 기준", "location": at("a", "t0")},
+             {"id": "k", "role": "condition", "text": "*임상시험 결과 20명 대상", "location": at("a", "t2")}]
+    checked = [{"id": "c", "textId": "x", "location": at("a", "t2"), "requiredChecks": ["substantiation"]}]
+    cards = test_footnote_cards(checked, texts)
+    assert [c["phrase"] for c in cards] == [note]            # no test named / its section already checked
+    assert cards[0]["requiredChecks"] == ["substantiation"] and cards[0]["source"] == "test_footnote"
 
 
 def test_a_result_promised_within_a_period_is_protected():

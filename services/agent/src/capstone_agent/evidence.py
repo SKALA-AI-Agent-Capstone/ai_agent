@@ -107,7 +107,8 @@ def conditions_for(claim: dict, texts: list[dict]) -> list[str]:
     own = []
     for text in texts:
         line = text.get("text", "")
-        if line == claim.get("phrase") or not CONDITION_LINE.search(line):
+        # Another claim of the section ("인체적용시험 완료" beside "모공부위 리프팅 개선 평가 완료") is not a condition.
+        if line == claim.get("phrase") or text.get("role", "condition") != "condition" or not CONDITION_LINE.search(line):
             continue
         other_file, other_tile = where(text)
         if other_file == file and (other_tile == tile or (starred and line.lstrip().startswith("*"))):
@@ -115,7 +116,33 @@ def conditions_for(claim: dict, texts: list[dict]) -> list[str]:
     return own[:10]
 
 
-async def match(provider, findings: list[dict], summaries: list[dict], ad_lines: list[str] | list[dict]) -> dict[str, dict]:
+# Facts a claim states exactly enough to look up in the document itself: measured items listed in brackets
+# ("(면적/볼륨/깊이)") and dates ("2024. 12. 30 ~ 2025. 01. 28"). The model may judge two effects alike; these
+# it may not overrule: a document that names none of them, or not the date, does not support the claim.
+LISTED_ITEMS = re.compile(r"\(([^()]*[/,·][^()]*)\)")
+DATE = re.compile(r"(20\d{2})\s*[.년\-/]\s*(\d{1,2})\s*[.월\-/]\s*(\d{1,2})")
+
+
+def dates_in(text: str) -> set[tuple[int, int, int]]:
+    return {(int(y), int(m), int(d)) for y, m, d in DATE.findall(text)}
+
+
+def missing_facts(claim_text: str, document_text: str) -> list[str]:
+    """Items and dates the claim states that the document text does not contain."""
+    plain = re.sub(r"\s+", "", document_text)
+    missing = []
+    for group in LISTED_ITEMS.findall(claim_text):
+        for item in re.split(r"[/,·]", group):
+            item = re.sub(r"\s+", "", item)
+            if len(item) >= 2 and re.search(r"[가-힣]", item) and item not in plain:
+                missing.append(item)
+    known = dates_in(document_text)
+    missing += [f"{y}.{m:02d}.{d:02d}" for y, m, d in sorted(dates_in(claim_text) - known)]
+    return list(dict.fromkeys(missing))
+
+
+async def match(provider, findings: list[dict], summaries: list[dict], ad_lines: list[str] | list[dict],
+                documents: list[dict] | None = None) -> dict[str, dict]:
     """findingId -> {verdict, documentId, documentName, reason, needed}. Empty when there is nothing to compare.
     ad_lines are the ad's text blocks (with locations), so each claim is compared with its own conditions only.
     Plain strings (no locations) are treated as conditions of every claim."""
@@ -131,15 +158,18 @@ async def match(provider, findings: list[dict], summaries: list[dict], ad_lines:
     else:
         shared = condition_lines(ad_lines)
         notes = {f["id"]: shared for f in targets}
-    claims = "\n".join(
-        f"- {f['id']}: {f['phrase']}\n  이 주장에 붙은 시험 조건: " + (" / ".join(notes[f["id"]]) or "(없음)") for f in targets)
-    output = await provider.parse(
-        instruction("evidence_match"),
-        ClaimMatches, text=f"제출 증빙 요약:\n{docs}\n\n실증이 필요한 주장:\n{claims}")
+    async def judge(claim):
+        # One call per claim: judged together, one claim's footnote (면적/볼륨/깊이) leaked into another's verdict.
+        text = (f"제출 증빙 요약:\n{docs}\n\n실증이 필요한 주장:\n- {claim['id']}: {claim['phrase']}\n"
+                f"  이 주장에 붙은 시험 조건: " + (" / ".join(notes[claim["id"]]) or "(없음)"))
+        output = await provider.parse(instruction("evidence_match"), ClaimMatches, text=text)
+        return [m for m in output.items if m.findingId == claim["id"]][:1]
+    found = await asyncio.gather(*(judge(f) for f in targets))
+    items = [m for group in found for m in group]
     names = {s["documentId"]: s["name"] for s in summaries}
     phrases = {f["id"]: f["phrase"] for f in targets}
     result = {}
-    for m in output.items:
+    for m in items:
         if m.findingId not in phrases:
             continue
         entry = {"verdict": m.verdict, "documentId": m.documentId, "documentName": names.get(m.documentId),
@@ -150,5 +180,11 @@ async def match(provider, findings: list[dict], summaries: list[dict], ad_lines:
             if doc:
                 entry = {"verdict": "supports", "documentId": doc["documentId"], "documentName": doc["name"], "needed": "",
                          "reason": f"광고의 기관 표기는 글자 인식 차이로 보이며 문서의 {doc['institution']}와 같은 기관입니다."}
+        source = next((d.get("text", "") for d in documents or [] if d.get("id") == entry["documentId"]), "")
+        if entry["verdict"] == "supports" and source:
+            missing = missing_facts(" ".join([phrase, *notes[m.findingId]]), source)
+            if missing:
+                entry = {**entry, "verdict": "condition_mismatch", "needed": "광고에 적힌 측정 항목과 연구 기간으로 시험한 자료",
+                         "reason": f"{entry['documentName'] or '제출 문서'}: 광고가 적은 {', '.join(missing)}이(가) 문서에 없습니다."}
         result[m.findingId] = entry
     return result

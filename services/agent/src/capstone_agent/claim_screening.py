@@ -10,6 +10,8 @@ _SUBJECTIVE_ENDING = re.compile(
     r"싶(?:다|어요|습니다|네요)|"
     r"(?:의사|의향)\s*(?:가|이)\s*(?:있다|있어요|있습니다|있음))$"
 )
+# Satisfaction ("높은 만족도의 모공개선 효과") reports how users felt, like "~것 같다"; a figure or a test beside it keeps it.
+_SATISFACTION = re.compile(r"만족")
 # A survey line often repeats itself in English ("지속적으로 사용할 의사가 있다 Be willing to continue to use").
 _TRAILING_TRANSLATION = re.compile(r"\s+[A-Za-z][A-Za-z\s'’\-]*$")
 _FACTUAL_SIGNAL = re.compile(
@@ -27,4 +29,4 @@ def is_subjective_only(phrase: str) -> bool:
     copy = _TRAILING_TRANSLATION.sub("", (phrase or "").strip()).rstrip(".!?。…~ \"'”’")
     if re.search(r"[,;:\n]|[.!?]\s*\S", copy):
         return False  # Another clause may assert a separate fact.
-    return bool(_SUBJECTIVE_ENDING.search(copy)) and not _FACTUAL_SIGNAL.search(copy)
+    return bool(_SUBJECTIVE_ENDING.search(copy) or _SATISFACTION.search(copy)) and not _FACTUAL_SIGNAL.search(copy)

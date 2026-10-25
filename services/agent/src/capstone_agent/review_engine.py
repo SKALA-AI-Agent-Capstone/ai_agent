@@ -28,7 +28,7 @@ from .regulations import legal_basis, search_basis
 from .judged_basis import judged_basis
 from .overreach import review_overreach
 from .ingredient_presence import rescue_ingredient_claims, settle_ingredient_claims
-from .vague_effect import dismiss_vague_effects, set_aside_low_risk
+from .vague_effect import dismiss_vague_effects, set_aside_low_risk, test_footnote_cards
 from .severity_rules import raise_for_lapsed_patents
 from .tools import McpTools
 from .guardrails import mask_tool_result
@@ -756,6 +756,8 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         # Generic care copy that names no specific effect has nothing for a reviewer to check (vague_effect.py).
         kept, vague = dismiss_vague_effects(lookup["findings"], state["texts"])
         lookup["findings"], lookup["dismissed"] = kept, lookup["dismissed"] + vague + low_at_parse
+        # A footnote that names a human test is checked against the evidence when no claim of its section is.
+        lookup["findings"] += test_footnote_cards(lookup["findings"], state["texts"])
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
             if not finding.get("tileId"):
@@ -789,7 +791,8 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
             # 증빙마다 시험 요약을 만들고, 실증이 필요한 주장과 한 번에 대조한다(evidence.py).
             try:
                 evidence["summaries"] = await summarize(provider, evidence["documents"])
-                matches = await match_evidence(provider, result["findings"], evidence["summaries"], state["texts"])
+                matches = await match_evidence(provider, result["findings"], evidence["summaries"], state["texts"],
+                                               evidence["documents"])
                 evidence["claimMatches"] = [{"findingId": k, **v} for k, v in matches.items()]
             except Exception:
                 warnings.append("EVIDENCE_MATCH_FAILED")
