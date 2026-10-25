@@ -734,7 +734,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         claim_texts = [t for t in state["texts"] if t.get("role") != "condition"]
         # With a model: judge, pick basis tools per claim, verify apart (judged_basis.py). Without one: rules and search.
         # Cards the first pass rated low go no further unless they name something checkable (vague_effect.py).
-        candidates, low_at_parse = set_aside_low_risk(state["findings"])
+        candidates, low_at_parse = set_aside_low_risk(state["findings"], state["texts"])
         if provider.client:
             # The overreach review releases cards nothing in the ad supports before any basis is fetched for them.
             lookup = await judged_basis(candidates, provider, texts=claim_texts, section_texts=state["texts"],
@@ -746,7 +746,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         lookup["findings"], lookup["dismissed"] = rescue_ingredient_claims(lookup["findings"], lookup.get("dismissed", []),
                                                                            state["texts"])
         # Generic care copy that names no specific effect has nothing for a reviewer to check (vague_effect.py).
-        kept, vague = dismiss_vague_effects(lookup["findings"])
+        kept, vague = dismiss_vague_effects(lookup["findings"], state["texts"])
         lookup["findings"], lookup["dismissed"] = kept, lookup["dismissed"] + vague + low_at_parse
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
