@@ -27,6 +27,7 @@ from .instructions import instruction
 from .regulations import legal_basis, search_basis
 from .judged_basis import judged_basis
 from .overreach import review_overreach
+from .ingredient_presence import rescue_ingredient_claims, settle_ingredient_claims
 from .tools import McpTools
 from .guardrails import mask_tool_result
 from .patent_certificate import group_patent_certificate, patent_numbers
@@ -616,10 +617,11 @@ async def select_business_tools(provider, state, request):
                 output = await invoke(name)
                 trace.append({"tool": name, "called": True})
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(output, default=str)[:4000]})
-    # Registered evidence is what the reviewer submitted to answer substantiation claims: when a card needs it,
+    # Registered evidence is what the reviewer submitted to answer substantiation claims, and it is also where an
+    # ingredient claim is confirmed (ingredient_presence): when a card needs it,
     # the comparison is not left to the model's choice (it skipped the tool in 2 of 4 runs with evidence present).
     if available["structure_evidence"] and "structure_evidence" not in called and \
-            any("substantiation" in f.get("requiredChecks", []) for f in state["findings"]):
+            any("substantiation" in f.get("requiredChecks", []) or f.get("claimType") == "ingredient" for f in state["findings"]):
         called.append("structure_evidence")
         await invoke("structure_evidence")
         trace.append({"tool": "structure_evidence", "called": True, "required": True})
@@ -736,6 +738,9 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         else:
             lookup = await legal_basis(state["findings"], texts=claim_texts)
         await emit(request, "tool_finished", tool="legal_basis", ok=lookup["status"] in ("connected", "skipped"))
+        # A plain ingredient claim is not settled by judgment but by the attached material (checks node).
+        lookup["findings"], lookup["dismissed"] = rescue_ingredient_claims(lookup["findings"], lookup.get("dismissed", []),
+                                                                           state["texts"])
         # 규칙 sweep이 추가한 문구는 text_path를 거치지 않아 대표 구간이 비어 있다. 여기서 같은 방식으로 정한다.
         for finding in lookup["findings"]:
             if not finding.get("tileId"):
@@ -782,6 +787,9 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
         out["warnings"] = out["warnings"] + warnings
         result = {**result, "evidence": evidence}
         kept, resolved = resolved_by_evidence(out["findings"])
+        # A card that only says what the product contains is settled when the attached material says it too.
+        kept, settled = settle_ingredient_claims(kept, state["texts"], evidence.get("documents", []))
+        resolved = resolved + settled
         return {"result": {**result, "findings": kept, "checksSummary": out["summary"],
                            "dismissedFindings": result.get("dismissedFindings", []) + resolved,
                            "functionalReports": out.get("functionalReports"),

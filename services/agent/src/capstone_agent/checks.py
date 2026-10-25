@@ -20,7 +20,7 @@ from .tools import McpTools
 
 ATTENTION = {"mismatch", "not_found", "ambiguous", "evidence_missing", "prohibited", "restricted",
              "gmp_not_listed", "needs_input", "unavailable", "evidence_mismatch", "evidence_conditions",
-             "evidence_not_covering", "evidence_unread", "patent_expired"}
+             "evidence_not_covering", "evidence_unread", "patent_expired", "not_in_attachments"}
 # evidence.match verdict -> check status. supports is the only one the reviewer does not need to chase.
 MATCH_STATUS = {"supports": "evidence_supports", "different_test": "evidence_mismatch",
                 "condition_mismatch": "evidence_conditions", "not_covered": "evidence_not_covering"}
