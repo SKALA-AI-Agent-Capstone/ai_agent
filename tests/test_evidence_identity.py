@@ -41,6 +41,15 @@ def test_issuer_with_two_labelled_codes_keeps_both_under_their_labels():
     assert {(c["label"], c["value"]) for c in codes} == {("연구번호", "PM-25J17-SA017"), ("시료번호", "PM-25SA-018")}
 
 
+def test_a_study_of_another_test_on_the_same_sample_keeps_its_own_study_number():
+    # 모공부위 리프팅 시험: 자극 시험과 시료번호는 같고 연구번호의 시험 기호(LI)만 다르다.
+    lifting = [page.replace("PM-25J17-SA017", "PM-25J24-LI003").replace("피부 일차자극", "안면(모공부위) 리프팅 개선")
+               for page in PROBEM_PAGES]
+    codes = eid.extract_codes(lifting, eid.detect_issuer(lifting))
+    assert {(c["label"], c["value"]) for c in codes} == {("연구번호", "PM-25J24-LI003"), ("시료번호", "PM-25SA-018")}
+    assert all(c["value"] != "PM-25SA-018" for c in codes if c["label"] == "연구번호")
+
+
 def test_a_code_seen_on_one_page_is_not_confirmed_and_two_candidates_are_ambiguous():
     pages = ["한국피부임상연구센터 HBSE-MGE-24032"] + ["한국피부임상연구센터 본문"] * 3
     assert eid.extract_codes(pages, eid.detect_issuer(pages))[0]["status"] == "single_page"

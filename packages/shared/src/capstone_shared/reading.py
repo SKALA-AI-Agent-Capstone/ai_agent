@@ -28,7 +28,7 @@ import pypdfium2 as pdfium
 
 from . import ocr_engine
 
-READER_VERSION = "2026.10.23.1"
+READER_VERSION = "2026.10.26.1"
 MAX_BYTES = 25 * 1024 * 1024
 MAX_PAGES = 80
 MAX_PIXELS = 40_000_000
