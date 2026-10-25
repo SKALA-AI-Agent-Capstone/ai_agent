@@ -474,16 +474,24 @@ BUSINESS_TOOL_SPECS = [
 ]
 
 
+# Codes that say the call itself did not work (no key, the provider did not answer or refused the request, the tool
+# could not be reached). Every other "error" an adapter fills in is information about a call that worked: nothing was
+# found, the result needs a person's confirmation, the reported item was cancelled, the search was cut short.
+CALL_FAILED = {"API_NOT_CONFIGURED", "PROVIDER_REQUEST_FAILED", "PROVIDER_REJECTED_REQUEST", "KNOWLEDGE_DB_UNAVAILABLE",
+               "UNKNOWN_TOOL"}
+
+
 def tool_succeeded(output):
-    """For the progress event only: an adapter error inside a result (api_error, not configured) is a failure.
-    Adapter results always carry an "error" key, so only a non-empty value counts. A lookup that found
-    nothing (not_found) or needs confirmation is a successful call, not a failure."""
+    """For the progress event only: the call must have failed, not the lookup come back empty. A lookup that found
+    nothing (not_found), found several candidates (ambiguous) or needs confirmation (needs_confirm, no exact patent match)
+    is a successful call, not a failure."""
     items = output if isinstance(output, list) else [output]
     for item in items:
         if not isinstance(item, dict):
             continue
         status = str(item.get("status", "")).lower()
-        if item.get("error") or status in ("api_error", "api_not_configured", "error"):
+        code = str(item.get("error") or "")
+        if status in ("api_error", "api_not_configured") or code in CALL_FAILED or code.endswith("_TOOL_UNAVAILABLE"):
             return False
     return True
 
