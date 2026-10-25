@@ -18,6 +18,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from capstone_shared.evidence_identity import product_names
+
 from .instructions import instruction
 
 VERDICTS = ("supports", "different_test", "condition_mismatch", "not_covered")
@@ -48,14 +50,29 @@ class ClaimMatches(BaseModel):
     items: list[ClaimMatch]
 
 
+def scope_to_product(summary: dict, doc: dict) -> dict:
+    """A report that tests several products (#1 ~ #4) states every product's measures in its purpose, method and
+    conclusion, and the page of one product's result also carries the others' rows. Only the result rows of the
+    registered product (doc["results"], read when the evidence was registered) say what it was measured on, so
+    they replace what the model summarised: another product's 수분량 or 탄력 never supports this product's claim."""
+    if len(product_names([doc.get("text", "")])) < 2:
+        return summary
+    rows = {(r["item"], r["changePct"]): r for r in doc.get("results") or [] if r.get("item") and r.get("changePct") is not None}
+    measures = list(dict.fromkeys(item for item, _ in rows))
+    found = "; ".join(f"{item} {pct:g}% 변화율" + (" 유의" if r.get("significant") else "") for (item, pct), r in rows.items())
+    return {**summary, "measures": measures,
+            "purpose": "여러 제품을 함께 시험한 보고서입니다. 등록한 제품의 결과표 행만 반영했습니다: " + (", ".join(measures) or "없음"),
+            "result": found or "등록한 제품의 결과표 행을 찾지 못했습니다."}
+
+
 async def summarize(provider, documents: list[dict]) -> list[dict]:
     async def one(doc):
         try:
             summary = await provider.parse(
                 instruction("evidence_summary"),
                 EvidenceSummary, text=f"문서 이름: {doc.get('name')}\n{doc.get('text', '')[:15000]}")
-            return {"documentId": doc["id"], "name": doc.get("name"), "docType": doc.get("docType", ""),
-                    **summary.model_dump()}
+            return scope_to_product({"documentId": doc["id"], "name": doc.get("name"), "docType": doc.get("docType", ""),
+                                     **summary.model_dump()}, doc)
         except Exception:
             return None
     found = await asyncio.gather(*(one(d) for d in documents if d.get("text", "").strip()))
