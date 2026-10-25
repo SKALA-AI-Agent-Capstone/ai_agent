@@ -89,6 +89,8 @@ def test_only_copy_that_says_a_named_ingredient_is_in_the_product_counts_as_an_i
     from capstone_agent.ingredient_presence import ingredient_claim
     assert ingredient_claim("울릉도 해양 심층수와 3종 히알루론산 듬뿐 세안 후에도")    # OCR misread of 듬뿍 still counts
     assert ingredient_claim("히알루론산 함유") and ingredient_claim("콜라겐 가득 담은 크림")
+    assert ingredient_claim("모란 추출물 함유") and ingredient_claim("셀 소스™ 성분을 함유한 에센스")
+    assert not ingredient_claim("모란 추출물") and not ingredient_claim("다마스크 로즈 워터")   # a bare name claims nothing
     for other in ["시간이 경과해도 마르지 않는 촉촉한 크림제형", "식물소재만 담아 자극걱정없이 순하게 진정 케어",
                   "브레아트 애플사이더 100%", "히알루론산으로 주름 개선", "수분 및 영양 공급"]:
         assert not ingredient_claim(other), other
@@ -121,3 +123,35 @@ def test_a_known_ingredient_the_extraction_missed_is_still_checked():
     assert names_of(only_one) == ["히알루론산", "해양심층수"]
     kept, settled = settle_ingredient_claims([only_one], [AD_LINE, {"id": "t2", "text": "정제수, 소듐하이알루로네이트"}], [])
     assert settled == [] and "해양심층수" in kept[0]["checks"][-1]["summary"]   # one of the two is not in the material
+
+
+def test_a_named_raw_material_is_looked_up_even_when_the_safety_step_names_nothing():
+    from capstone_agent.ingredient_presence import names_of
+    assert names_of(card("모란 추출물", checks=[])) == ["모란 추출물"]
+    assert names_of(card("셀 소스™ 성분을 함유한 에센스", checks=[])) == ["셀 소스"]
+    kept, _ = settle_ingredient_claims([card("셀 소스 성분을 함유한 에센스", checks=[])], [AD_LINE, AD_LIST], [])
+    assert kept[0]["checks"][-1]["status"] == "not_in_attachments"          # looked up, and not in the material
+
+
+def test_copy_that_only_introduces_ingredients_by_name_is_not_a_claim():
+    for phrase in ("모란 추출물", "피부 보습 및 보호 성분 판테놀, 알란토인"):
+        kept, settled = settle_ingredient_claims([card(phrase, checks=[])], [AD_LINE], [])
+        assert kept == [] and settled[0]["source"] == "ingredient_named"
+
+
+def test_effect_copy_the_first_pass_never_listed_becomes_a_card():
+    from capstone_agent.ingredient_presence import rescue_ingredient_claims
+    texts = [{"id": "a", "role": "claim", "text": "비타민 콤플렉스로 피부를 보호해주는 항산화 앰플"},
+             {"id": "b", "role": "claim", "text": "더 퍼스트 앰플 마스크"},
+             {"id": "c", "role": "condition", "text": "10% 할인"},
+             {"id": "d", "role": "claim", "text": "필러 침투"}]
+    dismissed = [{"id": "x", "textId": "d", "phrase": "필러 침투", "source": "model"}]
+    findings, left = rescue_ingredient_claims([], dismissed, texts)
+    assert sorted(f["textId"] for f in findings) == ["a", "d"] and left == []
+
+
+def test_a_brands_own_trademarked_material_is_not_checked_against_the_ingredient_list():
+    kept, settled = settle_ingredient_claims([card("셀 소스™ 성분을 함유한 필수 퍼스트 워터 에센스", checks=[])], [AD_LINE, AD_LIST], [])
+    assert kept == [] and settled[0]["source"] == "brand_material"           # "퍼스트 워터 에센스" is the product
+    kept, _ = settle_ingredient_claims([card(checks=None)], [AD_LINE], [])          # an ordinary name is still looked up
+    assert len(kept) == 1

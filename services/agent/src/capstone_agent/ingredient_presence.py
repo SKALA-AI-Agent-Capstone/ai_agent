@@ -19,7 +19,8 @@ EFFECT = re.compile(
     r"|개선|완화|재생|치료|예방|강화|증가|감소|회복|제거|억제|효과|효능|리프팅|탄력|흡수율|침투")
 COUNT = re.compile(r"(\d+)\s*종")
 # Words that say the product contains something; "3종" counts too ("3종 히알루론산").
-PRESENCE = re.compile(r"함유|듬뿍|듬뿐|가득|담은|담아|담겨|배합|넣은|넣어|들어|함량|추출|\d+\s*종")
+# Only copy that says the product contains it is a claim; a bare name ("모란 추출물", "로즈 워터") is just a name.
+PRESENCE = re.compile(r"함유|듬뿍|듬뿐|가득|담은|담아|담겨|배합|넣은|넣어|들어|함량|\d+\s*종")
 
 # A name in ad copy and its spellings on an ingredient list (Korean INCI names differ from everyday names).
 ALIASES = {
@@ -68,9 +69,16 @@ def mentions(text: str, alias: list[str]) -> list[str]:
     return list(dict.fromkeys(squash(i) for i in re.split(r"[,，、\n]", text) if any(a in squash(i) for a in alias)))
 
 
+# A named raw material: "모란 추출물", "다마스크 로즈 워터", "셀 소스™ 성분을 함유한".
+# A material word followed by a product type is part of a product name ("필수 퍼스트 워터 에센스").
+PRODUCT_TYPE = r"\s*(?:에센스|크림|세럼|토너|마스크|앰플|로션|미스트|젤|폼|클렌저|밤|패드)"
+NAMED_MATERIAL = re.compile(r"[가-힣A-Za-z]{2,}\s*(?:추출물|오일|워터|엑스|발효물|분말)(?![가-힣A-Za-z])(?!" + PRODUCT_TYPE + r")|(?:[가-힣A-Za-z]+\s){0,2}[가-힣A-Za-z]{2,}™?\s*성분\s*(?:을|를)?\s*(?:함유|담은|배합)")
+
+
 def names_ingredient(phrase: str) -> bool:
     key = squash(phrase)
-    return any(a in key for alias in ALIASES.values() for a in alias) or bool(fallback_ingredients(phrase))
+    return any(a in key for alias in ALIASES.values() for a in alias) or bool(fallback_ingredients(phrase)) \
+        or bool(NAMED_MATERIAL.search(phrase))
 
 
 def ingredient_claim(phrase: str) -> bool:
@@ -84,10 +92,18 @@ def rescue_ingredient_claims(findings: list[dict], dismissed: list[dict], texts:
     by_id = {t["id"]: t for t in texts}
     taken = {f.get("textId") for f in findings}
     rescued, left = [], []
+    from .vague_effect import effect_claim
     for item in dismissed:
         block = by_id.get(item.get("textId"))
-        if block is None or item.get("textId") in taken or not ingredient_claim(item.get("phrase", "")):
+        phrase = item.get("phrase", "")
+        effect = item.get("source") == "model" and effect_claim(phrase)
+        if block is None or item.get("textId") in taken or not (ingredient_claim(phrase) or effect):
             left.append(item)
+            continue
+        if effect and not ingredient_claim(phrase):
+            # The judge waved through copy that itself states an effect ("노폐물과 각질을 제거"): a reviewer checks it.
+            taken.add(item["textId"])
+            rescued.append(effect_card(block, phrase))
             continue
         taken.add(item["textId"])
         phrase = item["phrase"]
@@ -99,7 +115,24 @@ def rescue_ingredient_claims(findings: list[dict], dismissed: list[dict], texts:
                         "title": "성분 함유 표현", "basis": [], "baseBasis": [], "confidence": None, "rewrites": [],
                         "references": [], "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None,
                         "source": "ingredient_claim"})
+    # Copy the first pass never listed is not lost either when it states an effect itself: no card and no dismissal
+    # covers the line ("비타민 콤플렉스로 피부를 보호해주는 항산화 앰플" read but not extracted).
+    seen = taken | {item.get("textId") for item in dismissed}
+    for block in texts:
+        if block.get("role") == "claim" and block["id"] not in seen and effect_claim(block.get("text", "").strip()):
+            seen.add(block["id"])
+            rescued.append(effect_card(block, block["text"].strip()))
     return findings + rescued, left
+
+
+def effect_card(block: dict, phrase: str) -> dict:
+    start = max(0, block["text"].find(phrase))
+    return {"id": f"eff-{block['id']}", "phrase": phrase, "start": start, "end": start + len(phrase),
+            "location": block.get("location"), "textId": block["id"], "severity": "low", "baseSeverity": "low",
+            "claimType": "clinical", "requiredChecks": ["substantiation"],
+            "reason": "효능을 직접 말하는 문구라 실증 자료로 확인해야 합니다.", "title": "확인할 효능 표현",
+            "basis": [], "baseBasis": [], "confidence": None, "rewrites": [], "references": [],
+            "category": "확인할 광고 주장", "legalStatus": "not_evaluated", "escalation": None, "source": "effect_claim"}
 
 
 def plain_ingredient_claim(card: dict) -> bool:
@@ -111,7 +144,8 @@ def names_of(card: dict) -> list[str]:
     phrase spells out (the extraction sometimes returns only one of two ingredients)."""
     phrase = card.get("phrase", "")
     named = [c["detail"]["ingredient"] for c in card.get("checks", []) if c.get("type") == "ingredient" and c.get("detail", {}).get("ingredient")]
-    named = named or fallback_ingredients(phrase)
+    named = named or fallback_ingredients(phrase) or [
+        re.sub(r"™?\s*성분\s*(?:을|를)?\s*(?:함유|담은|배합)$", "", m.group(0)).strip() for m in NAMED_MATERIAL.finditer(phrase)]
     known = [canonical for canonical, alias in ALIASES.items() if any(a in squash(phrase) for a in alias)
              and not any(any(a in squash(n) for a in alias) for n in named)]
     return list(dict.fromkeys(named + known))
@@ -143,6 +177,13 @@ def presence(card: dict, sources: list[tuple[str, str]]) -> tuple[str, str, dict
     return "in_attachments", summary, detail
 
 
+def trademarked_only(card: dict) -> bool:
+    """Every ingredient the card names is written as a trademark in the copy ("셀 소스™ 성분을 함유한")."""
+    phrase = card.get("phrase", "")
+    names = names_of(card)
+    return bool(names) and all(re.search(re.escape(n) + r"\s*[™®]", phrase) for n in names)
+
+
 def settle_ingredient_claims(findings: list[dict], texts: list[dict], documents: list[dict]) -> tuple[list[dict], list[dict]]:
     """-> (kept, settled). A plain ingredient claim whose ingredients the attached material confirms leaves as settled
     (no problem); otherwise it stays with an ingredient_list check. Other cards are untouched."""
@@ -150,6 +191,18 @@ def settle_ingredient_claims(findings: list[dict], texts: list[dict], documents:
     for f in findings:
         if not plain_ingredient_claim(f):
             kept.append(f)
+            continue
+        if not PRESENCE.search(f.get("phrase", "")):
+            # Copy that only introduces ingredients by name ("보습 및 보호 성분 판테놀, 알란토인") does not stress that
+            # the product contains them; like a bare name it is not a claim to check.
+            settled.append({"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"), "source": "ingredient_named",
+                            "reason": "성분 이름을 소개할 뿐 함유를 강조하거나 효능을 말하지 않아 확인할 주장이 없습니다."})
+            continue
+        if trademarked_only(f):
+            # A brand's own material name ("셀 소스™") never appears on an ingredient list or a test report under that
+            # name, so the attachments cannot confirm it, and saying the product contains its own material claims no effect.
+            settled.append({"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"), "source": "brand_material",
+                            "reason": "브랜드가 이름 붙인 자체 원료(™·®)를 담았다는 표현이라 전성분과 대조할 수 없고, 효능을 말하지 않아 확인할 주장이 없습니다."})
             continue
         status, summary, detail = presence(f, attachments(f, texts, documents))
         result = check("ingredient_list", status, summary, source="첨부 자료(광고, 제품 증빙)", detail=detail)

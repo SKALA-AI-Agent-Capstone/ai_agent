@@ -31,6 +31,8 @@ class TextIssue(BaseModel):
     reason: str
     claimType: str
     rewrites: list[str]
+    # How likely the phrase is a regulatory problem, as the first pass sees it. "low" is not sent to later steps.
+    risk: Literal["low", "medium", "high"] = "medium"
 
 
 class TextAssessment(BaseModel):

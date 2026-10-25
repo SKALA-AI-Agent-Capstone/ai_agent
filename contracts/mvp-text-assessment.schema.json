@@ -20,6 +20,16 @@
           },
           "title": "Rewrites",
           "type": "array"
+        },
+        "risk": {
+          "default": "medium",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Risk",
+          "type": "string"
         }
       },
       "required": [
