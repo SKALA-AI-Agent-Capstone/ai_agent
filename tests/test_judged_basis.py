@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from capstone_agent import judged_basis as jb
+from capstone_agent.claim_screening import is_subjective_only
 from capstone_agent.judged_basis import BasisCheck, ClaimJudgments, judged_basis
 
 DAY = "2026-10-22"
@@ -239,3 +240,27 @@ async def test_the_overreach_review_releases_cards_before_any_basis_is_fetched()
     assert [f["id"] for f in out["findings"]] == ["f1"]
     assert [d["source"] for d in out["dismissed"]] == ["overreach_review"]
     assert sum(1 for name, _ in model.seen if name == "BasisCheck") == 1  # only the kept card is verified
+
+
+async def test_subjective_claims_are_dismissed_before_model_and_basis_calls():
+    phrases = ["주름이 좋아진 것 같다", "모공이 줄어든 느낌이다", "피부가 좋아지고 싶다", "시험해 보고 싶다"]
+    candidates = [finding(f"f{i}", phrase, f"t{i}", "wrinkle") for i, phrase in enumerate(phrases)]
+
+    class NoCalls:
+        async def parse(self, *_args, **_kwargs):
+            raise AssertionError("subjective copy should not reach the judgment model")
+
+    async def no_rag(*_args, **_kwargs):
+        raise AssertionError("subjective copy should not trigger basis lookup")
+
+    out = await judged_basis(candidates, NoCalls(), call=no_rag)
+    assert out["status"] == "skipped" and out["findings"] == []
+    assert {d["phrase"] for d in out["dismissed"]} == set(phrases)
+
+
+def test_subjective_suffix_does_not_hide_a_separate_measured_claim():
+    assert is_subjective_only("탄력이 좋아진 것 같아요")
+    assert is_subjective_only("특허를 받고 싶다")
+    for phrase in ("주름 30% 개선된 것 같다", "임상시험 결과인 것 같다",
+                   "주름 개선 효과가 있다. 더 좋아지고 싶다"):
+        assert not is_subjective_only(phrase)

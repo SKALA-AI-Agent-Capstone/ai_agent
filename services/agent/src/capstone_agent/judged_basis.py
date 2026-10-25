@@ -25,6 +25,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .instructions import instruction
+from .claim_screening import is_subjective_only
 from .regulations import sweep_findings, to_basis
 from .tools import McpTools
 
@@ -378,6 +379,14 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
     used as each claim's context. review, when given, is the last look over the kept cards before any basis is
     fetched: it returns (kept, released, warnings), and released cards join the dismissed ones."""
     day = (review_date or date.today()).isoformat()
+    original_findings = findings
+    subjective = [f for f in findings if is_subjective_only(f.get("phrase", ""))]
+    findings = [f for f in findings if not is_subjective_only(f.get("phrase", ""))]
+    subjective_dismissed = [
+        {"id": f["id"], "phrase": f["phrase"], "textId": f.get("textId"),
+         "reason": "주관적인 체감이나 바람만 표현함", "source": "subjective_screen"}
+        for f in subjective
+    ]
     texts_by_id = {t["id"]: t for t in (section_texts or []) + (texts or [])}
     sections = {}
     for t in section_texts or texts or []:
@@ -387,7 +396,7 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
         swept = []
         if texts:
             try:
-                swept = await sweep_findings(session_call, texts, findings)
+                swept = await sweep_findings(session_call, texts, original_findings)
             except Exception:
                 swept = []
         candidates = findings + swept
@@ -396,14 +405,24 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
         for block in percent_copy(section_texts or texts or []):
             if block["id"] not in listed:
                 candidates.append(figure_candidate(block))
+        dismissed = list(subjective_dismissed)
+        retained = []
+        for finding in candidates:
+            if is_subjective_only(finding.get("phrase", "")):
+                dismissed.append({"id": finding["id"], "phrase": finding["phrase"],
+                                  "textId": finding.get("textId"), "reason": "주관적인 체감이나 바람만 표현함",
+                                  "source": "subjective_screen"})
+            else:
+                retained.append(finding)
+        candidates = retained
         if not candidates:
-            return [], [], [], []
+            return [], dismissed, [], []
         warnings = []
         try:
             judgments = await judge(provider, candidates, texts_by_id, sections)
         except Exception:
             judgments, warnings = {}, ["CLAIM_JUDGMENT_FAILED"]
-        kept, dismissed, seen = [], [], {}
+        kept, seen = [], {}
         for finding in candidates:
             judgment = judgments.get(finding["id"])
             if judgment is not None and not judgment.problem and PERCENT.search(finding["phrase"]):
@@ -456,7 +475,7 @@ async def judged_basis(findings: list[dict], provider, *, texts: list[dict] | No
         else:
             kept, dismissed, results, warnings = await run(call)
     except Exception:
-        return {"findings": findings, "dismissed": [], "status": "error", "snapshot": [],
+        return {"findings": findings, "dismissed": subjective_dismissed, "status": "error", "snapshot": [],
                 "warnings": ["LEGAL_SEARCH_UNAVAILABLE"]}
     if not kept:
         return {"findings": [], "dismissed": dismissed, "status": "skipped", "snapshot": [], "warnings": warnings}

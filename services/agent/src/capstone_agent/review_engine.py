@@ -181,7 +181,7 @@ async def rewrite_phrase(provider, request, attempts=2, call=None):
         async with McpTools(servers=("rag",)) as session_call:
             return await rewrite_phrase(provider, request, attempts, session_call)
     lookup = await search_basis([{"phrase":request.phrase,"claimType":request.claimType}], call=call)
-    basis = lookup["findings"][0].get("basis",[]) if lookup["status"]=="connected" else []
+    basis = lookup["findings"][0].get("basis", []) if lookup["status"] == "connected" and lookup["findings"] else []
     feedback, previous = [], list(request.previousRewrites)
     for _ in range(attempts):
         text, passed, reasoning = await draft_and_verify_rewrite(

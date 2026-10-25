@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 import re
 
 from .tools import McpTools
+from .claim_screening import is_subjective_only
 
 # Statute wording per claim type, used for the supplementary search query.
 CLAIM_HINTS = {
@@ -215,32 +216,50 @@ async def legal_basis(findings: list[dict], *, review_date: date | None = None, 
     Every finding is searched; there is no count limit (a cap once skipped the riskiest late claims).
     """
     day = (review_date or date.today()).isoformat()
+    original_findings = findings
+    subjective = [f for f in findings if is_subjective_only(f.get("phrase", ""))]
+    findings = [f for f in findings if not is_subjective_only(f.get("phrase", ""))]
+    subjective_dismissed = [
+        {"id": f.get("id"), "phrase": f["phrase"], "textId": f.get("textId"),
+         "reason": "주관적인 체감이나 바람만 표현함", "source": "subjective_screen"}
+        for f in subjective
+    ]
 
     async def run(session_call):
         swept = []
         if texts:
             try:
-                swept = await sweep_findings(session_call, texts, findings)
+                swept = await sweep_findings(session_call, texts, original_findings)
             except Exception:
                 swept = []
-        combined = findings + swept
-        return combined, (await run_all(session_call, combined, day) if combined else [])
+        combined, dismissed = list(findings), list(subjective_dismissed)
+        for candidate in swept:
+            if is_subjective_only(candidate.get("phrase", "")):
+                dismissed.append({"id": candidate.get("id"), "phrase": candidate["phrase"],
+                                  "textId": candidate.get("textId"), "reason": "주관적인 체감이나 바람만 표현함",
+                                  "source": "subjective_screen"})
+            else:
+                combined.append(candidate)
+        return combined, dismissed, (await run_all(session_call, combined, day) if combined else [])
 
     try:
         if call is None:
             async with McpTools(servers=("rag",)) as session_call:
-                findings, results = await run(session_call)
+                findings, dismissed, results = await run(session_call)
         else:
-            findings, results = await run(call)
+            findings, dismissed, results = await run(call)
     except Exception:
-        return {"findings": findings, "status": "error", "snapshot": [], "warnings": ["LEGAL_SEARCH_UNAVAILABLE"]}
+        return {"findings": findings, "dismissed": subjective_dismissed, "status": "error", "snapshot": [],
+                "warnings": ["LEGAL_SEARCH_UNAVAILABLE"]}
     if not findings:
-        return {"findings": findings, "status": "skipped", "snapshot": [], "warnings": []}
+        return {"findings": findings, "dismissed": dismissed, "status": "skipped", "snapshot": [], "warnings": []}
     states = [r["state"] for r in results]
     if all(s == "not_indexed" for s in states):
-        return {"findings": findings, "status": "not_indexed", "snapshot": [], "warnings": ["LEGAL_CORPUS_NOT_INDEXED"]}
+        return {"findings": findings, "dismissed": dismissed, "status": "not_indexed", "snapshot": [],
+                "warnings": ["LEGAL_CORPUS_NOT_INDEXED"]}
     if all(s == "failed" for s in states):
-        return {"findings": findings, "status": "error", "snapshot": [], "warnings": ["LEGAL_SEARCH_FAILED"]}
+        return {"findings": findings, "dismissed": dismissed, "status": "error", "snapshot": [],
+                "warnings": ["LEGAL_SEARCH_FAILED"]}
     enriched, snapshot, warnings = [], {}, []
     for finding, result in zip(findings, results):
         for item in result["basis"]:
@@ -255,7 +274,7 @@ async def legal_basis(findings: list[dict], *, review_date: date | None = None, 
             warnings.append("LEGAL_RULE_PROVISION_NOT_LOADED")
     if any(r["state"] == "failed" for r in results):
         warnings.append("LEGAL_SEARCH_PARTIAL")
-    return {"findings": enriched, "status": "connected", "snapshot": list(snapshot.values()),
+    return {"findings": enriched, "dismissed": dismissed, "status": "connected", "snapshot": list(snapshot.values()),
             "warnings": list(dict.fromkeys(warnings))}
 
 
