@@ -151,3 +151,23 @@ def test_a_long_seller_notice_that_mentions_tests_is_still_not_a_claim():
     c["textId"] = "t2"
     kept, dismissed = dismiss_vague_effects([c], [notice])
     assert kept == [] and dismissed
+
+
+
+def test_an_effect_under_a_footnote_citing_a_test_goes_to_the_evidence_check():
+    at = {"fileId": "b", "tileId": "b:p1:t0"}
+    texts = [{"id": "c", "text": "높은 만족도의 모공개선 효과", "location": at},
+             {"id": "f", "text": "*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 : 2024. 12. 30 ~ 2025. 01. 28",
+              "location": at}]
+    effect = {**card("모공개선 효과", i="e"), "textId": "c", "location": at}
+    mood = {**card("높은 만족도의", i="m"), "textId": "c", "location": at}
+    elsewhere = {**card("모공개선 효과", i="o"), "textId": "x", "location": {"fileId": "a", "tileId": "a:p1:t2"}}
+    kept, dismissed = dismiss_vague_effects([effect, mood, elsewhere], texts)
+    assert [f["id"] for f in kept] == ["e"] and "substantiation" in kept[0]["requiredChecks"]
+    assert {d["id"] for d in dismissed} == {"m", "o"}      # no effect word, or no test footnote in its section
+
+
+def test_a_result_promised_within_a_period_is_protected():
+    assert protected(card("*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어"))
+    assert protected(card("7일 이내 피부결 개선"))
+    assert not vague(card("*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어"))

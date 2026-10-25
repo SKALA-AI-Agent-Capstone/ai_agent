@@ -93,8 +93,32 @@ def condition_lines(ad_lines: list[str]) -> list[str]:
     return [line for line in ad_lines if CONDITION_LINE.search(line)][:40]
 
 
-async def match(provider, findings: list[dict], summaries: list[dict], ad_lines: list[str]) -> dict[str, dict]:
-    """findingId -> {verdict, documentId, documentName, reason, needed}. Empty when there is nothing to compare."""
+def where(item: dict) -> tuple[str | None, str | None]:
+    location = item.get("location") or {}
+    return location.get("fileId") or location.get("fileName"), item.get("tileId") or location.get("tileId")
+
+
+def conditions_for(claim: dict, texts: list[dict]) -> list[str]:
+    """The test conditions that belong to this claim: lines of its own section (same file, same tile), and when the
+    claim carries a footnote mark (*) the starred footnotes of its file. A footnote under another section
+    ("*일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 ...") describes that section's claim, not every claim of the ad."""
+    file, tile = where(claim)
+    starred = "*" in claim.get("phrase", "")
+    own = []
+    for text in texts:
+        line = text.get("text", "")
+        if line == claim.get("phrase") or not CONDITION_LINE.search(line):
+            continue
+        other_file, other_tile = where(text)
+        if other_file == file and (other_tile == tile or (starred and line.lstrip().startswith("*"))):
+            own.append(line)
+    return own[:10]
+
+
+async def match(provider, findings: list[dict], summaries: list[dict], ad_lines: list[str] | list[dict]) -> dict[str, dict]:
+    """findingId -> {verdict, documentId, documentName, reason, needed}. Empty when there is nothing to compare.
+    ad_lines are the ad's text blocks (with locations), so each claim is compared with its own conditions only.
+    Plain strings (no locations) are treated as conditions of every claim."""
     targets = [f for f in findings if "substantiation" in f.get("requiredChecks", [])]
     if not targets or not summaries:
         return {}
@@ -102,11 +126,16 @@ async def match(provider, findings: list[dict], summaries: list[dict], ad_lines:
         f"- {s['documentId']} ({s['name']}): 종류 {s['kind']}, 제목 {s['title']}, 목적 {s['purpose']}, "
         f"측정 {', '.join(s['measures'])}, 기간 {s['period']}, 대상 {s['subjects']}, 기관 {s['institution']}, 결과 {s['result']}"
         for s in summaries)
-    claims = "\n".join(f"- {f['id']}: {f['phrase']}" for f in targets)
-    notes = "\n".join(f"- {line}" for line in condition_lines(ad_lines)) or "(없음)"
+    if ad_lines and isinstance(ad_lines[0], dict):
+        notes = {f["id"]: conditions_for(f, ad_lines) for f in targets}
+    else:
+        shared = condition_lines(ad_lines)
+        notes = {f["id"]: shared for f in targets}
+    claims = "\n".join(
+        f"- {f['id']}: {f['phrase']}\n  이 주장에 붙은 시험 조건: " + (" / ".join(notes[f["id"]]) or "(없음)") for f in targets)
     output = await provider.parse(
         instruction("evidence_match"),
-        ClaimMatches, text=f"제출 증빙 요약:\n{docs}\n\n광고에 적힌 시험 조건:\n{notes}\n\n실증이 필요한 주장:\n{claims}")
+        ClaimMatches, text=f"제출 증빙 요약:\n{docs}\n\n실증이 필요한 주장:\n{claims}")
     names = {s["documentId"]: s["name"] for s in summaries}
     phrases = {f["id"]: f["phrase"] for f in targets}
     result = {}

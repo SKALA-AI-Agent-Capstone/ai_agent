@@ -789,8 +789,7 @@ def build_graph(native, tiles, provider, checkpointer, request=None):
             # 증빙마다 시험 요약을 만들고, 실증이 필요한 주장과 한 번에 대조한다(evidence.py).
             try:
                 evidence["summaries"] = await summarize(provider, evidence["documents"])
-                matches = await match_evidence(provider, result["findings"], evidence["summaries"],
-                                               [t["text"] for t in state["texts"]])
+                matches = await match_evidence(provider, result["findings"], evidence["summaries"], state["texts"])
                 evidence["claimMatches"] = [{"findingId": k, **v} for k, v in matches.items()]
             except Exception:
                 warnings.append("EVIDENCE_MATCH_FAILED")

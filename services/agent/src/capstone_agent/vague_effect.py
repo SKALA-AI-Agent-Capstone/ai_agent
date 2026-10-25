@@ -72,9 +72,24 @@ def source_line(card: dict, texts: list[dict] | None) -> str:
     return (block or {}).get("text", "") or card.get("phrase", "")
 
 
+# An effect stated under a footnote that cites a test ("모공개선 효과" over "*일시적 모공(면적/볼륨/깊이) 개선
+# 인체적용시험 ...") is that test's claim: the footnote sits in the same section of the ad, not on the claim's line.
+EFFECT_WORD = re.compile(r"개선|효과|감소|증가|완화|리프팅|탄력|축소|수축")
+FOOTNOTE_LENGTH = 2 * NOTICE_LENGTH
+
+
+def section_cites_test(card: dict, texts: list[dict] | None) -> bool:
+    from .evidence import where
+    if not EFFECT_WORD.search(card.get("phrase", "")):
+        return False
+    home = where(card)
+    return any(t.get("id") != card.get("textId") and where(t) == home and len(t.get("text", "")) <= FOOTNOTE_LENGTH
+               and TEST_CITED.search(t.get("text", "")) for t in texts or [])
+
+
 def cites_test(card: dict, texts: list[dict] | None) -> bool:
     line = source_line(card, texts)
-    return len(line) <= NOTICE_LENGTH and bool(TEST_CITED.search(line))
+    return (len(line) <= NOTICE_LENGTH and bool(TEST_CITED.search(line))) or section_cites_test(card, texts)
 
 
 def needs_evidence(card: dict) -> dict:

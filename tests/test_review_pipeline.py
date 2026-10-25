@@ -590,6 +590,33 @@ async def test_claim_match_keeps_only_known_claims_and_passes_ad_conditions():
     assert "20명 대상" in seen["text"] and "촉촉한 크림" not in seen["text"]
 
 
+async def test_each_claim_is_compared_only_with_the_conditions_of_its_own_section():
+    # 투집: the lifting claim sits in 투집1's box; the 면적/볼륨/깊이 footnote belongs to 투집2's satisfaction section.
+    from capstone_agent.evidence import ClaimMatches, match
+    seen = {}
+    class FakeProvider:
+        async def parse(self, prompt, schema, **kwargs):
+            seen["text"] = kwargs["text"]
+            return ClaimMatches(items=[])
+    at = lambda file, tile: {"fileId": file, "fileName": f"{file}.jpg", "tileId": f"{file}:p1:{tile}"}
+    texts = [{"id": "h", "text": "*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어", "location": at("a", "t0")},
+             {"id": "n", "text": "*일시적 모공 개선 평가 기준", "location": at("a", "t0")},
+             {"id": "l", "text": "모공부위 리프팅 개선 평가 완료", "location": at("a", "t2")},
+             {"id": "s", "text": "*투집 포어본드 일시적 모공(면적/볼륨/깊이) 개선 인체적용시험 *연구 기간 : 2024. 12. 30 ~ 2025. 01. 28 | 30~50대 여성",
+              "location": at("b", "t0")}]
+    findings = [{"id": "lift", "phrase": "모공부위 리프팅 개선 평가 완료", "location": at("a", "t2"), "requiredChecks": ["substantiation"]},
+                {"id": "head", "phrase": "*처지고 늘어진 모공 2주 안에 개선하는 신개념 모공 케어", "location": at("a", "t0"),
+                 "requiredChecks": ["substantiation"]},
+                {"id": "sat", "phrase": "높은 만족도의 모공개선 효과", "location": at("b", "t0"), "requiredChecks": ["substantiation"]}]
+    summaries = [{"documentId": "e", "name": "r2.pdf", "kind": "efficacy_test", "title": "t", "purpose": "리프팅",
+                  "measures": ["안면(모공부위) 리프팅"], "period": "", "subjects": "", "institution": "프로브엠", "result": ""}]
+    await match(FakeProvider(), findings, summaries, texts)
+    blocks = {b.split(":", 1)[0].strip("- "): b for b in seen["text"].split("\n- ")}
+    assert "볼륨" not in blocks["lift"] and "(없음)" in blocks["lift"]              # no footnote of another section
+    assert "일시적 모공 개선 평가 기준" in blocks["head"] and "볼륨" not in blocks["head"]  # its own starred footnote
+    assert "볼륨" in blocks["sat"]                                                  # the footnote of its own section
+
+
 def test_ocr_typos_in_an_institution_name_are_not_a_mismatch():
     from capstone_agent.evidence import same_institution
     assert same_institution("*연구기관 : (주)프로봄 피부임상연구센터", "㈜프로브엠 피부임상연구센터")
